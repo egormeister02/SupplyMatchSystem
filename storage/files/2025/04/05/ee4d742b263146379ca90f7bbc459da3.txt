@@ -1,0 +1,4 @@
+apikey = <your apikey>
+secretkey = <your secretkey>
+password = <your password>
+path_to_excel = <path to excel file>

@@ -17,44 +17,44 @@ from app.middlewares import setup_middlewares
 from app.services.database import init_db
 #from app.services.storage import s3_service
 
-# Настройка логирования
+# Logging setup
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Установка часового пояса
+# Timezone setup
 os.environ['TZ'] = config.TIMEZONE
 tz = pytz.timezone(config.TIMEZONE)
 
-# Инициализация бота и диспетчера
+# Bot and dispatcher initialization
 storage = MemoryStorage()
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
-# Инициализация приложения Quart
+# Quart application initialization
 app = Quart(__name__)
 
-# Регистрация обработчиков и middleware
+# Register handlers and middleware
 register_all_handlers(dp)
 setup_middlewares(dp)
 
 @app.before_serving
 async def startup():
-    """Действия при запуске приложения"""
-    logger.info("Запуск приложения...")
+    """Actions to perform on application startup"""
+    logger.info("Starting application...")
     
-    # Инициализация БД
+    # Database initialization
     db_ready = await init_db()
     if not db_ready:
-        logger.error("Не удалось инициализировать базу данных. Завершаем работу.")
+        logger.error("Failed to initialize database. Shutting down.")
         os.kill(os.getpid(), signal.SIGTERM)
         return
     
-    # Настройка вебхука
+    # Webhook setup
     webhook_url = f"{config.WEBHOOK_URL}{config.WEBHOOK_PATH}"
-    logger.info(f"Устанавливаем вебхук по адресу: {webhook_url}")
+    logger.info(f"Setting webhook at: {webhook_url}")
     
     await bot.delete_webhook()
     await bot.set_webhook(
@@ -62,36 +62,36 @@ async def startup():
         secret_token=getattr(config, 'WEBHOOK_SECRET', None)
     )
     
-    # Установка команд бота
+    # Set bot commands
     await bot.set_my_commands([
         types.BotCommand(command="/start", description="Главное меню"),
         types.BotCommand(command="/help", description="Помощь")
     ])
     
-    logger.info("Приложение успешно запущено")
+    logger.info("Application started successfully")
 
 @app.after_serving
 async def shutdown():
-    """Действия при остановке приложения"""
-    logger.info("Остановка приложения...")
+    """Actions to perform on application shutdown"""
+    logger.info("Stopping application...")
     await bot.delete_webhook()
     await bot.session.close()
-    logger.info("Приложение остановлено")
+    logger.info("Application stopped")
 
 @app.route(config.WEBHOOK_PATH, methods=['POST'])
 async def webhook_handler():
-    """Обработчик вебхуков от Telegram"""
+    """Telegram webhook handler"""
     try:
         data = await request.get_json()
         
-        # Проверка секретного токена в продакшене
+        # Check secret token in production
         if hasattr(config, 'WEBHOOK_SECRET') and config.WEBHOOK_SECRET:
             secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
             if secret != config.WEBHOOK_SECRET:
-                logger.warning("Получен запрос с неверным секретным токеном")
+                logger.warning("Request received with invalid secret token")
                 return jsonify({'status': 'error', 'message': 'Invalid token'}), 403
         
-        # Обработка обновления от Telegram
+        # Process Telegram update
         if 'update_id' in data:
             update = types.Update(**data)
             await dp.feed_update(bot=bot, update=update)
@@ -100,12 +100,12 @@ async def webhook_handler():
         return jsonify({'status': 'error', 'message': 'Invalid update format'}), 400
         
     except Exception as e:
-        logger.error(f"Ошибка при обработке вебхука: {str(e)}")
+        logger.error(f"Error processing webhook: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 async def health_check():
-    """Эндпоинт для проверки работоспособности приложения"""
+    """Endpoint to check application health"""
     return jsonify({
         'status': 'ok', 
         'timestamp': datetime.now(tz).isoformat(),
@@ -123,6 +123,6 @@ if __name__ == '__main__':
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        logger.info("Приложение завершено по запросу пользователя")
+        logger.info("Application terminated by user request")
     except Exception as e:
-        logger.error(f"Ошибка при запуске приложения: {str(e)}")
+        logger.error(f"Error starting application: {str(e)}")

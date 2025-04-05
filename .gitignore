@@ -3,4 +3,7 @@ credentials.json
 venv
 __pycache__
 temp*
-temp_qr_*.jpg
+.*
+.env*
+
+
