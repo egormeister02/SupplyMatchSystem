@@ -8,7 +8,7 @@ from pathlib import Path
 class LocalStorageService:
     """Local file storage service"""
     
-    def __init__(self, storage_path="storage/files"):
+    def __init__(self, storage_path="storage"):
         """
         Initialize local storage service
         
