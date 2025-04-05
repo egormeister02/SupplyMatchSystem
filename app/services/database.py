@@ -5,6 +5,7 @@ import asyncio
 import logging
 from app.config import config
 import os
+import re
 
 # Создаем базовый класс для моделей
 Base = declarative_base()
@@ -30,6 +31,32 @@ async def get_db():
         finally:
             await session.close()
 
+# Функция для разделения SQL скрипта на отдельные запросы
+def split_sql_script(script):
+    """Разделяет SQL-скрипт на отдельные запросы"""
+    # Используем регулярное выражение для разделения по ;
+    # Но игнорируем ; внутри строковых литералов и комментариев
+    queries = []
+    current_query = ""
+    
+    for line in script.splitlines():
+        # Пропускаем пустые строки и комментарии
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith('--'):
+            continue
+            
+        current_query += line + "\n"
+        
+        if stripped_line.endswith(';'):
+            queries.append(current_query.strip())
+            current_query = ""
+    
+    # Добавляем последний запрос, если он остался
+    if current_query.strip():
+        queries.append(current_query.strip())
+    
+    return queries
+
 # Функция инициализации БД
 async def init_db():
     """Асинхронная инициализация базы данных для разработки"""
@@ -47,16 +74,39 @@ async def init_db():
                 with open(schema_file, "r", encoding="utf-8") as f:
                     schema_sql = f.read()
                 
-                # Создаем всю схему сразу
-                await conn.execute(text(schema_sql))
+                # Разбиваем скрипт на отдельные запросы
+                schema_queries = split_sql_script(schema_sql)
+                
+                # Выполняем каждый запрос отдельно
+                for query in schema_queries:
+                    if query.strip():  # Проверяем, что запрос не пустой
+                        try:
+                            await conn.execute(text(query))
+                            logging.debug(f"Выполнен запрос: {query[:50]}...")
+                        except Exception as e:
+                            logging.error(f"Ошибка при выполнении запроса: {query[:50]}...\nОшибка: {e}")
+                            raise
                 
                 # Загружаем начальные данные
                 seed_file = os.path.join(os.path.dirname(__file__), "..", "..", "database", "seed_data.sql")
-                with open(seed_file, "r", encoding="utf-8") as f:
-                    seed_sql = f.read()
-                
-                # Вставляем начальные данные
-                await conn.execute(text(seed_sql))
+                try:
+                    with open(seed_file, "r", encoding="utf-8") as f:
+                        seed_sql = f.read()
+                    
+                    # Разбиваем скрипт на отдельные запросы
+                    seed_queries = split_sql_script(seed_sql)
+                    
+                    # Выполняем каждый запрос отдельно
+                    for query in seed_queries:
+                        if query.strip():  # Проверяем, что запрос не пустой
+                            try:
+                                await conn.execute(text(query))
+                                logging.debug(f"Выполнен запрос начальных данных: {query[:50]}...")
+                            except Exception as e:
+                                logging.error(f"Ошибка при выполнении запроса данных: {query[:50]}...\nОшибка: {e}")
+                                raise
+                except FileNotFoundError:
+                    logging.warning(f"Файл с начальными данными не найден: {seed_file}")
                 
                 logging.info("Схема базы данных успешно пересоздана")
             else:

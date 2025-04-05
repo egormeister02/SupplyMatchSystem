@@ -12,12 +12,6 @@ cleanup() {
     echo "Останавливаем PostgreSQL..."
     sudo systemctl stop postgresql
     
-    # Завершаем процесс ngrok, если он запущен
-    if pgrep -x "ngrok" > /dev/null; then
-        echo "Завершение ngrok..."
-        pkill -f ngrok
-    fi
-    
     echo "Очистка выполнена!"
 }
 
@@ -104,7 +98,7 @@ if grep -q "USE_NGROK=True" .env.local; then
 
         while [ -z "$NGROK_URL" ] && [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             echo "Попытка $ATTEMPT из $MAX_ATTEMPTS получить URL ngrok..."
-            sleep 5
+            sleep 1
             NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4)
             ATTEMPT=$((ATTEMPT+1))
         done

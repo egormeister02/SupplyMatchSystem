@@ -13,11 +13,11 @@ CREATE TABLE IF NOT EXISTS main_categories (
 );
 
 CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    category_id INTEGER NOT NULL,
+    main_category_name VARCHAR(255) NOT NULL,
 
-    FOREIGN KEY (category_id) REFERENCES main_categories(id),
-    PRIMARY KEY (name, category_id)
+    FOREIGN KEY (main_category_name) REFERENCES main_categories(name)
 );
 
 -- Таблица для пользователей
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     created_by_id INTEGER,
     tarrif VARCHAR(255),
 
-    FOREIGN KEY (created_by_id) REFERENCES users(id),
+    FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
@@ -60,9 +60,10 @@ CREATE TABLE IF NOT EXISTS requests (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
 
-    FOREIGN KEY (created_by_id) REFERENCES users(id),
+    FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
+
 -- Таблица для файлов
 CREATE TABLE IF NOT EXISTS files (
     id SERIAL PRIMARY KEY,
@@ -89,31 +90,34 @@ CREATE TABLE IF NOT EXISTS matches (
 -- Таблица для избранных поставщиков
 CREATE TABLE IF NOT EXISTS favorites (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) NOT NULL,
-    supplier_id INTEGER REFERENCES suppliers(id) NOT NULL,
+    user_id BIGINT,
+    supplier_id INTEGER,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE (user_id, supplier_id)
+    UNIQUE (user_id, supplier_id),
+
+    FOREIGN KEY (user_id) REFERENCES users(tg_id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
 CREATE TABLE IF NOT EXISTS help_requests (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER,
+    user_id BIGINT,
     request TEXT NOT NULL,
     status VARCHAR(50) CHECK (status IN ('pending', 'answered', 'closed')) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT NOW(),
 
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(tg_id)
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
     id SERIAL PRIMARY KEY,
     match_id INTEGER,
-    author_id INTEGER,
-    review_id INTEGER,
+    author_id BIGINT,
+    review_id BIGINT,
     review TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
 
     FOREIGN KEY (match_id) REFERENCES matches(id),
-    FOREIGN KEY (author_id) REFERENCES users(id),
-    FOREIGN KEY (review_id) REFERENCES users(id)
+    FOREIGN KEY (author_id) REFERENCES users(tg_id),
+    FOREIGN KEY (review_id) REFERENCES users(tg_id)
 );
