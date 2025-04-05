@@ -15,3 +15,4 @@ class LocalConfig(BaseConfig):
     
     # Другие специфичные для локальной разработки настройки
     DEBUG: bool = True
+    LOG_LEVEL: str = "DEBUG"

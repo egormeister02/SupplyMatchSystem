@@ -6,7 +6,8 @@ DROP TABLE IF EXISTS suppliers CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS help_requests CASCADE;
 DROP TABLE IF EXISTS reviews CASCADE;
-
+--DROP TABLE IF EXISTS main_categories CASCADE;
+--DROP TABLE IF EXISTS categories CASCADE;
 
 CREATE TABLE IF NOT EXISTS main_categories (
     name VARCHAR(255) NOT NULL UNIQUE PRIMARY KEY
@@ -26,8 +27,10 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(255),
     first_name VARCHAR(255),
     last_name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    last_active TIMESTAMP DEFAULT NOW()
+    phone VARCHAR(255) CHECK (phone IS NULL OR LENGTH(phone) >= 10),
+    email VARCHAR(255) CHECK (email IS NULL OR email ~* '^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+[.][A-Za-z]+$'),
+    role VARCHAR(255) CHECK (role IN ('user', 'admin')) DEFAULT 'user',
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Таблица для поставщиков
@@ -41,6 +44,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
     region VARCHAR(255),
     city VARCHAR(255),
     address VARCHAR(255),
+    contact_phone VARCHAR(255),
+    contact_email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     status VARCHAR(255) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
     website VARCHAR(255),
@@ -68,7 +73,7 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE TABLE IF NOT EXISTS files (
     id SERIAL PRIMARY KEY,
     type VARCHAR(50) NOT NULL,
-    s3_path VARCHAR(255) NOT NULL,
+    file_path VARCHAR(255) NOT NULL,
     name VARCHAR(255),
     request_id INTEGER,
     supplier_id INTEGER,

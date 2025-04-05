@@ -1,43 +1,18 @@
 from aiogram.fsm.state import StatesGroup, State
 
-class SeamstressStates(StatesGroup):
-    waiting_for_qr = State()
-    confirm_batch = State()
-
-class ControllerStates(StatesGroup):
-    waiting_for_qr = State()
-    confirm_batch = State()
-    
-class CutterStates(StatesGroup):
-    waiting_for_project_name = State()
-    waiting_for_product_name = State()
-    waiting_for_color = State()
-    waiting_for_size = State()
-    waiting_for_quantity = State()
-    waiting_for_parts_count = State()
-
-class ManagerStates(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_parts_number = State()
-    waiting_for_product_cost = State()
-    waiting_for_detail_payment = State()
-    # Состояния для создания пачки
-    waiting_for_batch_type = State()
-    waiting_for_project_name = State()
-    waiting_for_product_name = State()
-    waiting_for_color = State()
-    waiting_for_size = State()
-    waiting_for_quantity = State()
-    waiting_for_parts_count = State()
-    # Состояния для проверки пачки
-    waiting_for_qr = State()
-    confirm_batch = State()
-    waiting_for_payment_amount = State()
-    waiting_for_payment_type = State()
-
 class RegistrationStates(StatesGroup):
-    waiting_for_name = State()
+    """States for user registration process"""
+    waiting_first_name = State()
+    waiting_last_name = State()
+    waiting_email = State()  # Email address
+    waiting_contact = State()  # Optional phone number
+    confirm_registration = State()
 
-class RemakeRequest(StatesGroup):
-    waiting_for_equipment = State()
-    waiting_for_description = State()
+class SupplierCreationStates(StatesGroup):
+    """States for supplier creation process"""
+    waiting_company_name = State()
+    waiting_product_name = State()
+    waiting_main_category = State()
+    waiting_subcategory = State()
+    confirm_supplier_creation = State()
+

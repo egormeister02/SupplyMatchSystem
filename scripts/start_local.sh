@@ -1,32 +1,32 @@
 #!/bin/bash
 # scripts/start_local.sh
 
-# Установка переменных окружения
+# Set environment variables
 export APP_ENV="local"
 
-# Фиксация функции очистки для выполнения при завершении
+# Define cleanup function to execute on exit
 cleanup() {
     echo "Завершение работы и очистка..."
     
-    # Останавливаем PostgreSQL
-    echo "Останавливаем PostgreSQL..."
-    sudo systemctl stop postgresql
+    # Stop PostgreSQL
+    #echo "Останавливаем PostgreSQL..."
+    #sudo systemctl stop postgresql
     
     echo "Очистка выполнена!"
 }
 
-# Регистрируем функцию cleanup при завершении скрипта
+# Register cleanup function for script termination
 trap cleanup EXIT
 
-# Запускаем PostgreSQL, если он не запущен
+# Start PostgreSQL if not running
 if ! systemctl is-active --quiet postgresql; then
     echo "Запускаем PostgreSQL..."
     sudo systemctl start postgresql
     
-    # Ждем пока PostgreSQL полностью запустится
+    # Wait for PostgreSQL to fully start
     sleep 3
     
-    # Проверка запуска PostgreSQL
+    # Check PostgreSQL status
     if systemctl is-active --quiet postgresql; then
         echo "PostgreSQL успешно запущен"
     else
@@ -37,27 +37,27 @@ else
     echo "PostgreSQL уже запущен"
 fi
 
-# Проверка ngrok (если используется)
+# Check ngrok (if used)
 if grep -q "USE_NGROK=True" .env.local; then
-    # Если ngrok уже запущен, получаем URL
+    # If ngrok is already running, get URL
     if pgrep -x "ngrok" > /dev/null; then
         echo "Ngrok уже запущен, получаем URL..."
         NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4)
         
         if [ -n "$NGROK_URL" ]; then
             echo "Найден URL ngrok: $NGROK_URL"
-            # Обновляем в .env.local
+            # Update in .env.local
             sed -i "s|WEBHOOK_URL=.*|WEBHOOK_URL=$NGROK_URL|g" .env.local
         else
             echo "Не удалось получить URL ngrok. Запускаем новый экземпляр..."
             
-            # Получаем токен из .env.local
+            # Get token from .env.local
             NGROK_TOKEN=$(grep NGROK_AUTH_TOKEN .env.local | cut -d'=' -f2)
             
-            # Запускаем ngrok перенаправляя вывод в /dev/null
+            # Start ngrok redirecting output to /dev/null
             ngrok http 8000 > /dev/null 2>&1 &
             
-            # Увеличиваем время ожидания и добавляем проверку с повторами
+            # Increase wait time and add retry checks
             echo "Ожидаем запуск ngrok и получение туннеля..."
             MAX_ATTEMPTS=12
             ATTEMPT=1
@@ -77,20 +77,20 @@ if grep -q "USE_NGROK=True" .env.local; then
                 exit 1
             else
                 echo "Настроен новый URL ngrok: $NGROK_URL"
-                # Обновляем в .env.local
+                # Update in .env.local
                 sed -i "s|WEBHOOK_URL=.*|WEBHOOK_URL=$NGROK_URL|g" .env.local
             fi
         fi
     else
         echo "Ngrok не запущен. Запускаем..."
         
-        # Получаем токен из .env.local
+        # Get token from .env.local
         NGROK_TOKEN=$(grep NGROK_AUTH_TOKEN .env.local | cut -d'=' -f2)
         
-        # Запускаем ngrok в фоновом режиме перенаправляя вывод
+        # Start ngrok in background redirecting output
         ngrok http 8000 > /dev/null 2>&1 &
         
-        # Увеличиваем время ожидания и добавляем проверку с повторами
+        # Increase wait time and add retry checks
         echo "Ожидаем запуск ngrok и получение туннеля..."
         MAX_ATTEMPTS=12
         ATTEMPT=1
@@ -110,12 +110,12 @@ if grep -q "USE_NGROK=True" .env.local; then
             exit 1
         else
             echo "Настроен URL ngrok: $NGROK_URL"
-            # Обновляем в .env.local
+            # Update in .env.local
             sed -i "s|WEBHOOK_URL=.*|WEBHOOK_URL=$NGROK_URL|g" .env.local
         fi
     fi
 fi
 
-# Запуск приложения
+# Start application
 echo "Запуск бота..."
 python -m app.main
