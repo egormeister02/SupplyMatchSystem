@@ -43,7 +43,7 @@ def get_main_user_menu_keyboard():
     """Main menu with all available actions"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Поставщики", callback_data="suppliers_list")],
+            [InlineKeyboardButton(text="Поставщики", callback_data="suppliers")],
             [InlineKeyboardButton(text="Запросы", callback_data="requests_list")],
             [InlineKeyboardButton(text="Избранное", callback_data="favorites_list")],
             [InlineKeyboardButton(text="Помощь", callback_data="help_action")]
@@ -52,38 +52,40 @@ def get_main_user_menu_keyboard():
 
 # Универсальные функции для кнопок "Назад"
 
-def get_back_button(back_target, is_state=True):
+def get_back_button(back_target, is_state=True, button_text="Назад"):
     """
     Универсальная кнопка "Назад", которая работает как с состояниями, так и с действиями
     
     Args:
         back_target (str): Имя состояния или действия для возврата
         is_state (bool): True, если это состояние, False, если действие
+        button_text (str): Текст на кнопке, по умолчанию "Назад"
     
     Returns:
         InlineKeyboardButton: Кнопка "Назад" с соответствующим callback_data
     """
     prefix = "back_to_state:" if is_state else "back_to_action:"
-    return InlineKeyboardButton(text="Назад", callback_data=f"{prefix}{back_target}")
+    return InlineKeyboardButton(text=button_text, callback_data=f"{prefix}{back_target}")
 
-def get_back_keyboard(back_target, is_state=True):
+def get_back_keyboard(back_target, is_state=True, button_text="Назад"):
     """
     Универсальная клавиатура только с кнопкой "Назад", работающая как с состояниями, так и с действиями
     
     Args:
         back_target (str): Имя состояния или действия для возврата
         is_state (bool): True, если это состояние, False, если действие
+        button_text (str): Текст на кнопке, по умолчанию "Назад"
     
     Returns:
         InlineKeyboardMarkup: Клавиатура с кнопкой "Назад"
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [get_back_button(back_target, is_state)]
+            [get_back_button(back_target, is_state, button_text)]
         ]
     )
 
-def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1):
+def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, button_text="Назад"):
     """
     Универсальная функция для создания клавиатуры с кнопками и кнопкой "Назад"
     
@@ -92,6 +94,7 @@ def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1):
         back_target (str): Имя состояния или действия для возврата
         is_state (bool): True, если это состояние, False, если действие
         row_width (int): Количество кнопок в строке (кроме кнопки "Назад")
+        button_text (str): Текст на кнопке "Назад", по умолчанию "Назад"
     
     Returns:
         InlineKeyboardMarkup: Клавиатура с кнопками и кнопкой "Назад"
@@ -109,7 +112,7 @@ def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1):
         keyboard.append(row)
     
     # Add back button in the last row
-    keyboard.append([get_back_button(back_target, is_state)])
+    keyboard.append([get_back_button(back_target, is_state, button_text)])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

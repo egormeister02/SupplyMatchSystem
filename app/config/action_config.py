@@ -10,27 +10,27 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.keyboards.inline import (
     get_back_keyboard,
     get_keyboard_with_back,
-    get_back_button
+    get_back_button,
+    get_main_user_menu_keyboard
 )
 
 # Конфигурация действий меню
 action_config = {
     "main_menu": {
         "text": "Главное меню. Выберите действие:",
-        "markup": InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Поставщики", callback_data="suppliers_list")],
-                [InlineKeyboardButton(text="Запросы", callback_data="requests_list")],
-                [InlineKeyboardButton(text="Избранное", callback_data="favorites_list")],
-                [InlineKeyboardButton(text="Помощь", callback_data="help_action")]
-            ]
-        ),
+        "markup": get_main_user_menu_keyboard(),
         "parent": None,  # У главного меню нет родителя
     },
     
-    "suppliers_list": {
-        "text": "Список поставщиков по категориям:",
-        "markup": None,  # Будет заполнено после обновления inline.py
+    "suppliers": {
+        "text": "Меню поставщиков:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Создать поставщика", callback_data="create_supplier")],
+                [InlineKeyboardButton(text="Мои поставщики", callback_data="my_suppliers")],
+                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:main_menu")]
+            ]
+        ),
         "parent": "main_menu",
     },
     
@@ -66,6 +66,15 @@ action_config = {
         "markup": None,  # Будет заполнено после обновления inline.py
         "parent": "main_menu",
     },
+
+    "my_suppliers": {
+        "text": "Ваши созданные поставщики:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:suppliers_list")]
+            ]
+        )
+    }
 }
 
 def get_action_config(action):

@@ -211,3 +211,81 @@ class DBService:
             await self.rollback()
             logging.error(f"Error saving user: {e}")
             return False
+
+    async def get_user_by_id(self, user_id: int):
+        """Get user information by Telegram ID"""
+        query = """
+            SELECT tg_id, username, first_name, last_name, email, phone, role, created_at
+            FROM users
+            WHERE tg_id = :user_id
+        """
+        result = await self.execute_query(query, {"user_id": user_id})
+        return result.mappings().first()
+    
+    async def get_main_categories(self):
+        """Get list of main categories"""
+        query = """
+            SELECT name
+            FROM main_categories
+            ORDER BY name
+        """
+        result = await self.execute_query(query)
+        return result.mappings().all()
+    
+    async def get_subcategories(self, main_category_name: str):
+        """Get subcategories for a main category"""
+        query = """
+            SELECT id, name
+            FROM categories
+            WHERE main_category_name = :main_category_name
+            ORDER BY name
+        """
+        result = await self.execute_query(query, {"main_category_name": main_category_name})
+        return result.mappings().all()
+    
+    async def save_supplier(
+        self,
+        company_name: str,
+        product_name: str,
+        category_id: int,
+        description: str = None,
+        country: str = None,
+        region: str = None,
+        city: str = None,
+        address: str = None,
+        contact_phone: str = None,
+        contact_email: str = None,
+        website: str = None,
+        created_by_id: int = None
+    ):
+        """Save supplier information to database"""
+        query = """
+            INSERT INTO suppliers (
+                company_name, product_name, category_id, description,
+                country, region, city, address, contact_phone, 
+                contact_email, website, created_by_id
+            )
+            VALUES (
+                :company_name, :product_name, :category_id, :description,
+                :country, :region, :city, :address, :contact_phone,
+                :contact_email, :website, :created_by_id
+            )
+            RETURNING id
+        """
+        params = {
+            "company_name": company_name,
+            "product_name": product_name,
+            "category_id": category_id,
+            "description": description,
+            "country": country,
+            "region": region,
+            "city": city,
+            "address": address,
+            "contact_phone": contact_phone,
+            "contact_email": contact_email,
+            "website": website,
+            "created_by_id": created_by_id
+        }
+        result = await self.execute_query(query, params)
+        await self.commit()
+        return result.scalar_one()

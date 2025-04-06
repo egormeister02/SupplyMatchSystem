@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime
 
-from aiogram import Router, F, Bot
+from aiogram import Router, F, Bot, types
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -26,6 +26,12 @@ router = Router()
 # Validation patterns
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
 PHONE_PATTERN = re.compile(r'^\+?[0-9]{10,15}$')  # International phone numbers
+
+def is_valid_email(email):
+    """Проверяет валидность email с помощью простого регулярного выражения"""
+    if not email:
+        return False
+    return bool(EMAIL_PATTERN.match(email))
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot, state: FSMContext):
@@ -103,54 +109,28 @@ async def process_last_name(message: Message, state: FSMContext, bot: Bot):
 @router.message(RegistrationStates.waiting_email)
 async def process_email(message: Message, state: FSMContext, bot: Bot):
     """Handle email input during registration"""
-    # Check if email is valid
-    if not EMAIL_PATTERN.match(message.text):
-        # Получаем конфигурацию текущего состояния для сообщения об ошибке
+    email = message.text.strip()
+    
+    # Validate email with simple regex
+    if not is_valid_email(email):
+        # Get configuration for email state
         email_config = get_state_config(RegistrationStates.waiting_email)
-        
-        await message.answer(
-            email_config.get("error_text", "Пожалуйста, введите корректный email или нажмите 'Пропустить':"),
-            reply_markup=email_config.get("markup")
-        )
+        await message.answer(email_config["error_text"], reply_markup=email_config.get("markup"))
         return
     
     # Save email to state
-    await state.update_data(email=message.text)
+    await state.update_data(email=email)
     
-    # Получаем конфигурацию для следующего состояния
+    # Get configuration for contact state
     contact_config = get_state_config(RegistrationStates.waiting_contact)
     
-    # Удаляем клавиатуру у предыдущего сообщения (если возможно)
-    await remove_keyboard_from_context(bot, message)
-    
-    # Ask for phone number with contact sharing button
+    # Ask for contact with custom keyboard
     await message.answer(
         contact_config["text"],
         reply_markup=contact_config.get("markup")
     )
     
-    await state.set_state(RegistrationStates.waiting_contact)
-
-@router.callback_query(RegistrationStates.waiting_email, F.data == "skip")
-async def skip_email(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Skip email input"""
-    await callback.answer()
-    
-    # Save NULL for email
-    await state.update_data(email=None)
-    
-    # Получаем конфигурацию для следующего состояния
-    contact_config = get_state_config(RegistrationStates.waiting_contact)
-    
-    # Remove keyboard from current message
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Ask for phone number with contact sharing button
-    await callback.message.answer(
-        contact_config["text"],
-        reply_markup=contact_config.get("markup")
-    )
-    
+    # Set state to waiting for contact
     await state.set_state(RegistrationStates.waiting_contact)
 
 @router.message(RegistrationStates.waiting_contact, F.contact)
@@ -166,7 +146,7 @@ async def process_contact_shared(message: Message, state: FSMContext, bot: Bot):
 @router.message(RegistrationStates.waiting_contact, F.text == "Пропустить")
 async def process_contact_skipped(message: Message, state: FSMContext, bot: Bot):
     """Handle skipped contact during registration"""
-    # Save NULL for phone
+    # Save None as phone to state
     await state.update_data(phone=None)
     
     # Show confirmation
@@ -265,46 +245,6 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext, bot: 
         )
         
         # Не очищаем state, чтобы пользователь мог вернуться и попробовать зарегистрироваться снова
-
-@router.callback_query(RegistrationStates.confirm_registration, F.data == "edit")
-async def edit_registration(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Handle registration edit request"""
-    await callback.answer()
-    
-    # Remove keyboard from previous message
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Получаем конфигурацию для первого состояния
-    first_name_config = get_state_config(RegistrationStates.waiting_first_name)
-    
-    # Start registration process again
-    await callback.message.answer(
-        "Давайте начнем сначала. " + first_name_config["text"],
-        reply_markup=first_name_config.get("markup")
-    )
-    
-    await state.set_state(RegistrationStates.waiting_first_name)
-
-@router.callback_query(RegistrationStates.confirm_registration, F.data == "back")
-async def process_confirmation_back(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Handle back button on confirmation stage"""
-    await callback.answer()
-    
-    # Удаляем клавиатуру у текущего сообщения
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Возвращаемся к предыдущему состоянию (ввод контакта)
-    # Получаем конфигурацию для состояния ввода контакта
-    contact_config = get_state_config(RegistrationStates.waiting_contact)
-    
-    # Устанавливаем состояние
-    await state.set_state(RegistrationStates.waiting_contact)
-    
-    # Отправляем новое сообщение вместо редактирования
-    await callback.message.answer(
-        contact_config.get("text", "Теперь введите ваш номер телефона или пропустите этот шаг:"),
-        reply_markup=contact_config.get("markup")
-    )
 
 # Helper functions
 async def show_registration_confirmation(message: Message, state: FSMContext, bot: Bot):
