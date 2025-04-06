@@ -15,7 +15,7 @@ from app.services import get_db_session, DBService
 from app.states.states import RegistrationStates
 from app.states.state_config import get_state_config
 from app.keyboards.inline import (
-    get_main_menu_keyboard,
+    get_main_user_menu_keyboard,
     get_back_keyboard
 )
 from app.utils.message_utils import remove_keyboard_from_context
@@ -41,8 +41,8 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     if user_exists:
         # User exists, show main menu
         await message.answer(
-            f"Добро пожаловать назад, {message.from_user.first_name}! Выберите действие:",
-            reply_markup=get_main_menu_keyboard()
+            f"Добро пожаловать в меню, {message.from_user.first_name}! Выберите действие:",
+            reply_markup=get_main_user_menu_keyboard()
         )
         # Reset any active states
         await state.clear()
@@ -245,7 +245,7 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext, bot: 
         # Show main menu
         await callback.message.answer(
             "Регистрация успешно завершена! Добро пожаловать!",
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=get_main_user_menu_keyboard()
         )
         
         # Clear state
@@ -261,7 +261,7 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext, bot: 
         # Сообщаем пользователю об ошибке
         await callback.message.answer(
             "К сожалению, произошла ошибка при регистрации. Пожалуйста, попробуйте позже или свяжитесь с поддержкой.",
-            reply_markup=get_back_keyboard("back_to_waiting_first_name")
+            reply_markup=get_back_keyboard("waiting_first_name", is_state=True)
         )
         
         # Не очищаем state, чтобы пользователь мог вернуться и попробовать зарегистрироваться снова
@@ -285,61 +285,25 @@ async def edit_registration(callback: CallbackQuery, state: FSMContext, bot: Bot
     
     await state.set_state(RegistrationStates.waiting_first_name)
 
-# Main menu handlers
-@router.callback_query(F.data == "my_requests")
-async def process_my_requests(callback: CallbackQuery, bot: Bot):
-    """Handle my requests button"""
+@router.callback_query(RegistrationStates.confirm_registration, F.data == "back")
+async def process_confirmation_back(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Handle back button on confirmation stage"""
     await callback.answer()
     
-    # Remove keyboard from current message
+    # Удаляем клавиатуру у текущего сообщения
     await remove_keyboard_from_context(bot, callback)
     
-    # Show new message with back button
+    # Возвращаемся к предыдущему состоянию (ввод контакта)
+    # Получаем конфигурацию для состояния ввода контакта
+    contact_config = get_state_config(RegistrationStates.waiting_contact)
+    
+    # Устанавливаем состояние
+    await state.set_state(RegistrationStates.waiting_contact)
+    
+    # Отправляем новое сообщение вместо редактирования
     await callback.message.answer(
-        "Раздел 'Мои запросы' находится в разработке.",
-        reply_markup=get_back_keyboard()
-    )
-
-@router.callback_query(F.data == "find_supplier")
-async def process_find_supplier(callback: CallbackQuery, bot: Bot):
-    """Handle find supplier button"""
-    await callback.answer()
-    
-    # Remove keyboard from current message
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Show new message with back button
-    await callback.message.answer(
-        "Раздел 'Найти поставщика' находится в разработке.",
-        reply_markup=get_back_keyboard()
-    )
-
-@router.callback_query(F.data == "favorites")
-async def process_favorites(callback: CallbackQuery, bot: Bot):
-    """Handle favorites button"""
-    await callback.answer()
-    
-    # Remove keyboard from current message
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Show new message with back button
-    await callback.message.answer(
-        "Раздел 'Избранное' находится в разработке.",
-        reply_markup=get_back_keyboard()
-    )
-
-@router.callback_query(F.data == "help")
-async def process_help(callback: CallbackQuery, bot: Bot):
-    """Handle help button"""
-    await callback.answer()
-    
-    # Remove keyboard from current message
-    await remove_keyboard_from_context(bot, callback)
-    
-    # Show new message with back button
-    await callback.message.answer(
-        "Раздел 'Помощь' находится в разработке.",
-        reply_markup=get_back_keyboard()
+        contact_config.get("text", "Теперь введите ваш номер телефона или пропустите этот шаг:"),
+        reply_markup=contact_config.get("markup")
     )
 
 # Helper functions

@@ -52,6 +52,14 @@ async def startup():
         os.kill(os.getpid(), signal.SIGTERM)
         return
     
+    # Инициализация конфигурации действий
+    try:
+        from app.config.action_config import update_action_markups
+        update_action_markups()
+        logger.info("Action config initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize action config: {str(e)}")
+    
     # Webhook setup
     webhook_url = f"{config.WEBHOOK_URL}{config.WEBHOOK_PATH}"
     logger.info(f"Setting webhook at: {webhook_url}")

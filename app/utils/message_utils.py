@@ -4,8 +4,9 @@ Utility functions for message operations
 
 from typing import Union, Optional
 from aiogram import Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup
 from aiogram.exceptions import TelegramAPIError
+import logging
 
 async def remove_previous_keyboard(
     bot: Bot, 
@@ -82,6 +83,10 @@ async def edit_message_text_and_keyboard(
     Returns:
         bool: True if message was edited successfully, False otherwise
     """
+    # Проверяем тип клавиатуры - можно редактировать только InlineKeyboardMarkup
+    if isinstance(reply_markup, ReplyKeyboardMarkup):
+        return False  # Нельзя редактировать сообщение с ReplyKeyboardMarkup
+        
     try:
         await bot.edit_message_text(
             chat_id=chat_id,
@@ -90,6 +95,8 @@ async def edit_message_text_and_keyboard(
             reply_markup=reply_markup
         )
         return True
-    except TelegramAPIError:
+    except TelegramAPIError as e:
+        # Логируем ошибку для отладки
+        logging.error(f"Error editing message: {e}")
         # Message can't be edited or hasn't changed
         return False 
