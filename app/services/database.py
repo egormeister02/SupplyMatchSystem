@@ -14,7 +14,7 @@ Base = declarative_base()
 # Create async engine for PostgreSQL
 engine = create_async_engine(
     config.DATABASE_URL,
-    echo=config.DEBUG
+    echo=True
 )
 
 # Create session factory

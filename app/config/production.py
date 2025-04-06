@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # Загружаем продакшн переменные окружения
 load_dotenv(".env.prod")
 
-class ProductionConfig(ProductionConfig):
+class ProductionConfig(BaseConfig):
     # Настройки для продакшена
     WEBHOOK_URL: str
     WEBHOOK_PATH: str = "/webhook"
