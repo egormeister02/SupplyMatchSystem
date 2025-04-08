@@ -1,3 +1,3 @@
-from .states import RegistrationStates
+# States placeholder for future FSM definitions
 
-__all__ = ["RegistrationStates"]
+__all__ = []

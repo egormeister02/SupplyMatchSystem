@@ -2,11 +2,16 @@
 Handlers initialization
 """
 
-from app.handlers import user, base, actions, suppliers
+import logging
+
+from .base import router as base_router  # optional, keep minimal
+
+logger = logging.getLogger(__name__)
 
 def register_all_handlers(dp):
-    """Register all available handlers"""
-    base.register_handlers(dp)
-    actions.register_handlers(dp)
-    user.register_handlers(dp)
-    suppliers.register_handlers(dp)
+    """Регистрирует минимальный набор обработчиков."""
+    try:
+        dp.include_router(base_router)
+        logger.info("Base handlers registered")
+    except Exception as e:
+        logger.error(f"Ошибка при регистрации базовых обработчиков: {e}")

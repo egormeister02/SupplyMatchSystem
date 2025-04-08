@@ -7,7 +7,10 @@ from app.config import config
 import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
+logger = logging.getLogger(__name__)
 # Base class for models
 Base = declarative_base()
 
@@ -35,25 +38,36 @@ async def get_db_session():
 
 # Function to split SQL script into separate queries
 def split_sql_script(script):
-    """Splits SQL script into separate queries"""
-    # Use regex to split by semicolon
-    # But ignore semicolons inside string literals and comments
+    """Splits SQL script into separate queries handling dollar-quoted strings in PostgreSQL"""
     queries = []
     current_query = ""
+    in_dollar_quote = False
+    dollar_quote_tag = ""
     
-    for line in script.splitlines():
-        # Skip empty lines and comments
-        stripped_line = line.strip()
-        if not stripped_line or stripped_line.startswith('--'):
+    # Split by semicolons that are not inside dollar quotes
+    parts = script.split(';')
+    for part in parts:
+        part = part.strip()
+        if not part:
             continue
             
-        current_query += line + "\n"
-        
-        if stripped_line.endswith(';'):
-            queries.append(current_query.strip())
-            current_query = ""
+        # Check for dollar quotes
+        if '$$' in part:
+            if not in_dollar_quote:
+                in_dollar_quote = True
+                current_query = part
+            else:
+                current_query += ';' + part
+                in_dollar_quote = False
+                queries.append(current_query)
+                current_query = ""
+        else:
+            if in_dollar_quote:
+                current_query += ';' + part
+            else:
+                queries.append(part)
     
-    # Add the last query if it exists
+    # Add the last query if it exists and wasn't already added
     if current_query.strip():
         queries.append(current_query.strip())
     
@@ -61,65 +75,50 @@ def split_sql_script(script):
 
 # Database initialization function
 async def init_db():
-    """Async database initialization for development"""
+    """Initialize database with schema"""
     try:
-        async with engine.begin() as conn:
-            # Check if schema recreation mode is enabled
-            # If the variable doesn't exist or equals "true", recreate schema
-            recreate_schema = os.getenv("RECREATE_DB_SCHEMA", "true").lower() == "true"
+        # Проверяем флаг RECREATE_DB_SCHEMA в конфигурации
+        if str(config.RECREATE_DB_SCHEMA).lower() == 'true':
+            logger.info("RECREATE_DB_SCHEMA = True, начинаем инициализацию базы данных")
             
-            if recreate_schema:
-                logging.info("Recreating database schema...")
+            # Get init directory path
+            init_path = Path(__file__).parent.parent.parent / 'database' / 'init'
+            
+            # Execute initialization scripts in order
+            for script_file in sorted(init_path.glob('*.sql')):
+                logger.info(f"Executing initialization script: {script_file.name}")
+                with open(script_file, 'r', encoding='utf-8') as f:
+                    script = f.read()
                 
-                # Read schema file
-                schema_file = os.path.join(os.path.dirname(__file__), "..", "..", "database", "schema.sql")
-                with open(schema_file, "r", encoding="utf-8") as f:
-                    schema_sql = f.read()
-                
-                # Split script into separate queries
-                schema_queries = split_sql_script(schema_sql)
+                # Split script into individual queries
+                queries = split_sql_script(script)
                 
                 # Execute each query separately
-                for query in schema_queries:
-                    if query.strip():  # Check that query is not empty
-                        try:
-                            await conn.execute(text(query))
-                            logging.debug(f"Executed query: {query[:50]}...")
-                        except Exception as e:
-                            logging.error(f"Error executing query: {query[:50]}...\nError: {e}")
-                            raise
-                
-                # Load initial data
-                seed_file = os.path.join(os.path.dirname(__file__), "..", "..", "database", "seed_data.sql")
-                try:
-                    with open(seed_file, "r", encoding="utf-8") as f:
-                        seed_sql = f.read()
-                    
-                    # Split script into separate queries
-                    seed_queries = split_sql_script(seed_sql)
-                    
-                    # Execute each query separately
-                    for query in seed_queries:
-                        if query.strip():  # Check that query is not empty
-                            try:
-                                await conn.execute(text(query))
-                                logging.debug(f"Executed seed data query: {query[:50]}...")
-                            except Exception as e:
-                                logging.error(f"Error executing seed data query: {query[:50]}...\nError: {e}")
-                                raise
-                except FileNotFoundError:
-                    logging.warning(f"Seed data file not found: {seed_file}")
-                
-                logging.info("Database schema successfully recreated")
-            else:
-                # Just check connection
-                await conn.execute(text("SELECT 1"))
-                logging.info("Database connection successful")
+                for i, query in enumerate(queries):
+                    if not query.strip():  # Skip empty queries
+                        continue
+                    try:
+                        logger.info(f"Executing query {i+1} from {script_file.name}: {query[:100]}...")
+                        await DBService.execute(query)
+                        logger.info(f"Successfully executed query {i+1} from {script_file.name}")
+                    except Exception as e:
+                        logger.error(f"Error executing query {i+1} from {script_file.name}: {str(e)}")
+                        logger.error(f"Problematic query: {query}")
+                        logger.error(f"Exception type: {type(e).__name__}")
+                        logger.error(f"Full exception: {repr(e)}")
+                        # Continue with next query even if one fails
+                        continue
             
-            return True
+            logger.info("Database initialization completed")
+        else:
+            logger.info("RECREATE_DB_SCHEMA = False, пропускаем инициализацию базы данных")
+            
+        return True  # Return True to indicate success
     except Exception as e:
-        logging.error(f"Error initializing database: {e}")
-        return False
+        logger.error(f"Error initializing database: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Full exception: {repr(e)}")
+        return False  # Return False to indicate failure
 
 # Class for database operations
 class DBService:
@@ -142,150 +141,68 @@ class DBService:
         await self.session.rollback()
             
     @staticmethod
-    async def execute(query, params=None):
-        """Execute SQL query with a new session (static method)"""
-        async with AsyncSessionLocal() as session:
-            try:
-                result = await session.execute(text(query), params)
-                await session.commit()
-                return result
-            except Exception as e:
-                await session.rollback()
-                logging.error(f"Query execution error: {e}")
-                raise
+    async def execute(query: str, params: dict = None) -> None:
+        """Execute a query without returning results"""
+        try:
+            async with engine.begin() as conn:
+                if params:
+                    await conn.execute(text(query), params)
+                else:
+                    await conn.execute(text(query))
+        except Exception as e:
+            logger.error(f"Error executing query: {query[:100]}...")
+            logger.error(f"Error details: {str(e)}")
+            raise
     
-    async def check_user_exists(self, user_id: int) -> bool:
-        """Check if user exists in database by Telegram ID"""
-        query = "SELECT 1 FROM users WHERE tg_id = :user_id LIMIT 1"
-        result = await self.execute_query(query, {"user_id": user_id})
-        return result.scalar() is not None
-    
-    async def save_user(
-        self, 
-        user_id: int, 
-        username: str, 
-        first_name: str, 
-        last_name: str, 
-        email: str = None, 
-        phone: str = None
-    ) -> bool:
+    @staticmethod
+    async def fetch_data(query: str, params: dict = None):
         """
-        Save user to database. If user exists, update their information.
+        Статический метод для выполнения запросов только на чтение.
+        Не требует создания сессии и не держит соединение открытым.
         
         Args:
-            user_id (int): Telegram user ID
-            username (str): Telegram username (can be None)
-            first_name (str): User's first name
-            last_name (str): User's last name
-            email (str, optional): User's email address
-            phone (str, optional): User's phone number
+            query (str): SQL запрос
+            params (dict, optional): Параметры запроса
             
         Returns:
-            bool: True if operation was successful
+            list: Список словарей с результатами запроса или None если ничего не найдено
         """
-        query = """
-            INSERT INTO users (tg_id, username, first_name, last_name, email, phone, created_at)
-            VALUES (:user_id, :username, :first_name, :last_name, :email, :phone, NOW())
-            ON CONFLICT (tg_id) DO UPDATE
-            SET username = :username, 
-                first_name = :first_name, 
-                last_name = :last_name,
-                email = COALESCE(:email, users.email),
-                phone = COALESCE(:phone, users.phone)
-        """
-        params = {
-            "user_id": user_id,
-            "username": username,
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "phone": phone
-        }
-        
         try:
-            await self.execute_query(query, params)
-            await self.commit()
-            logging.info(f"User saved: {user_id}, {username}, email: {email or 'NULL'}, phone: {phone or 'NULL'}")
-            return True
+            async with engine.connect() as conn:
+                if params:
+                    result = await conn.execute(text(query), params)
+                else:
+                    result = await conn.execute(text(query))
+                    
+                return [dict(row) for row in result.mappings()]
         except Exception as e:
-            await self.rollback()
-            logging.error(f"Error saving user: {e}")
-            return False
-
-    async def get_user_by_id(self, user_id: int):
-        """Get user information by Telegram ID"""
-        query = """
-            SELECT tg_id, username, first_name, last_name, email, phone, role, created_at
-            FROM users
-            WHERE tg_id = :user_id
-        """
-        result = await self.execute_query(query, {"user_id": user_id})
-        return result.mappings().first()
+            logger.error(f"Error executing read query: {query[:100]}...")
+            logger.error(f"Error details: {str(e)}")
+            raise
     
-    async def get_main_categories(self):
-        """Get list of main categories"""
-        query = """
-            SELECT name
-            FROM main_categories
-            ORDER BY name
+    @staticmethod
+    async def fetch_one(query: str, params: dict = None):
         """
-        result = await self.execute_query(query)
-        return result.mappings().all()
+        Статический метод для выполнения запросов только на чтение и получения одной записи.
+        
+        Args:
+            query (str): SQL запрос
+            params (dict, optional): Параметры запроса
+            
+        Returns:
+            dict: Словарь с результатом запроса или None если ничего не найдено
+        """
+        try:
+            async with engine.connect() as conn:
+                if params:
+                    result = await conn.execute(text(query), params)
+                else:
+                    result = await conn.execute(text(query))
+                    
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error executing read query: {query[:100]}...")
+            logger.error(f"Error details: {str(e)}")
+            raise
     
-    async def get_subcategories(self, main_category_name: str):
-        """Get subcategories for a main category"""
-        query = """
-            SELECT id, name
-            FROM categories
-            WHERE main_category_name = :main_category_name
-            ORDER BY name
-        """
-        result = await self.execute_query(query, {"main_category_name": main_category_name})
-        return result.mappings().all()
-    
-    async def save_supplier(
-        self,
-        company_name: str,
-        product_name: str,
-        category_id: int,
-        description: str = None,
-        country: str = None,
-        region: str = None,
-        city: str = None,
-        address: str = None,
-        contact_phone: str = None,
-        contact_email: str = None,
-        website: str = None,
-        created_by_id: int = None
-    ):
-        """Save supplier information to database"""
-        query = """
-            INSERT INTO suppliers (
-                company_name, product_name, category_id, description,
-                country, region, city, address, contact_phone, 
-                contact_email, website, created_by_id
-            )
-            VALUES (
-                :company_name, :product_name, :category_id, :description,
-                :country, :region, :city, :address, :contact_phone,
-                :contact_email, :website, :created_by_id
-            )
-            RETURNING id
-        """
-        params = {
-            "company_name": company_name,
-            "product_name": product_name,
-            "category_id": category_id,
-            "description": description,
-            "country": country,
-            "region": region,
-            "city": city,
-            "address": address,
-            "contact_phone": contact_phone,
-            "contact_email": contact_email,
-            "website": website,
-            "created_by_id": created_by_id
-        }
-        result = await self.execute_query(query, params)
-        await self.commit()
-        return result.scalar_one()

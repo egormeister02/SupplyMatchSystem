@@ -4,9 +4,43 @@ Utility functions for message operations
 
 from typing import Union, Optional
 from aiogram import Bot
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types.input_file import FSInputFile
+from aiogram.types import InputMediaPhoto, InputMediaVideo
 from aiogram.exceptions import TelegramAPIError
 import logging
+import os
+from app.services.local_storage import local_storage_service
+from app.services import get_db_session, DBService
+
+# Вспомогательная функция для получения имени администратора по ID
+async def get_admin_username(admin_id):
+    """
+    Получает username администратора по его ID
+    
+    Args:
+        admin_id: ID администратора
+        
+    Returns:
+        str: Username администратора или его ID как строка
+    """
+    try:
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            user_data = await db_service.get_user_by_id(admin_id)
+            
+            if user_data:
+                if user_data.get("username"):
+                    return f"{user_data.get('username')} (ID:{admin_id})"
+                else:
+                    first_name = user_data.get("first_name", "")
+                    last_name = user_data.get("last_name", "")
+                    full_name = f"{first_name} {last_name}".strip()
+                    return f"{full_name if full_name else 'Администратор'} (ID:{admin_id})"
+            return f"ID:{admin_id}"
+    except Exception as e:
+        logging.error(f"Ошибка при получении данных администратора: {e}")
+        return f"ID:{admin_id}"
 
 async def remove_previous_keyboard(
     bot: Bot, 
@@ -100,3 +134,750 @@ async def edit_message_text_and_keyboard(
         logging.error(f"Error editing message: {e}")
         # Message can't be edited or hasn't changed
         return False 
+    
+
+async def send_supplier_card(
+    bot: Bot,
+    chat_id: int, 
+    supplier: dict, 
+    keyboard: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None, 
+    message_id: Optional[int] = None,
+    include_video: bool = True,  # Параметр для включения видео в группу
+    show_status: bool = False    # Параметр для отображения статуса поставщика
+) -> dict:
+    """
+    Отправляет или редактирует карточку поставщика в указанный чат.
+    
+    Args:
+        bot (Bot): Объект бота для отправки сообщений
+        chat_id (int): ID чата для отправки
+        supplier (dict): Словарь с данными о поставщике
+        keyboard (Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]]): Клавиатура для сообщения
+        message_id (Optional[int]): ID сообщения для редактирования (если None, то отправляется новое)
+        include_video (bool): Включать ли видео в медиа-группу (если True и есть несколько фото)
+        show_status (bool): Показывать ли статус поставщика
+        
+    Returns:
+        dict: Словарь с message_ids всех отправленных сообщений:
+            - keyboard_message_id: ID сообщения с клавиатурой
+            - media_message_ids: список ID сообщений медиагруппы или ID сообщения с фото
+    """
+    # Формируем текст сообщения
+    # Формируем заголовок
+    title = f"Название: {supplier.get('company_name')}"
+    
+    # Категория и подкатегория
+    category_info = []
+    if supplier.get('main_category_name'):
+        category_info.append(supplier.get('main_category_name'))
+    if supplier.get('category_name'):
+        category_info.append(supplier.get('category_name'))
+    
+    category_text = " > ".join(category_info) if category_info else "Не указана"
+    
+    # Описание
+    description = supplier.get('description', 'Не указано')
+    
+    # Местоположение
+    location_parts = []
+    if supplier.get('country'):
+        location_parts.append(supplier.get('country'))
+    if supplier.get('region'):
+        location_parts.append(supplier.get('region'))
+    if supplier.get('city'):
+        location_parts.append(supplier.get('city'))
+    if supplier.get('address'):
+        location_parts.append(supplier.get('address'))
+    
+    location = ", ".join(location_parts) if location_parts else "Не указано"
+    
+    # Контактная информация
+    contacts = []
+    if supplier.get('contact_username'):
+        contacts.append(f"Telegram: {supplier.get('contact_username')}")
+    if supplier.get('contact_phone'):
+        contacts.append(f"Телефон: {supplier.get('contact_phone')}")
+    if supplier.get('contact_email'):
+        contacts.append(f"Email: {supplier.get('contact_email')}")
+    
+    contact_info = "\n".join(contacts) if contacts else "Контактная информация не указана"
+    
+    # Фотографии и видео
+    photos = supplier.get('photos', [])
+    video = supplier.get('video')
+    
+    # Добавляем подробное логирование для отладки видео
+    logging.info(f"Данные по медиа поставщика {supplier.get('id')}:")
+    logging.info(f"Фотографии: {len(photos) if photos else 0} шт.")
+    logging.info(f"Наличие видео: {video is not None}")
+    if video:
+        logging.info(f"Подробные данные видео: {video}")
+    
+    media_info = []
+    if photos:
+        media_info.append(f"Фотографий: {len(photos)}")
+    if video:
+        media_info.append("Видео: имеется")
+    
+    media_text = ", ".join(media_info) if media_info else "Медиа: отсутствуют"
+    
+    # Собираем полный текст сообщения
+    text = f"{title}\n\n"
+    text += f"Категория: {category_text}\n"
+    text += f"Продукт/услуга: {supplier.get('product_name', 'Не указан')}\n\n"
+    text += f"Описание:\n{description}\n\n"
+    text += f"Местоположение: {location}\n\n"
+    text += f"Контакты:\n{contact_info}\n\n"
+    text += f"{media_text}"
+    
+    # Добавляем информацию о статусе поставщика, если запрошено
+    if show_status:
+        status = supplier.get('status', 'pending')
+        status_emoji = "✅" if status == "approved" else "❌" if status == "rejected" else "⏳"
+        status_text = "Одобрен" if status == "approved" else "Отклонен" if status == "rejected" else "На проверке"
+        text += f"\n\nСтатус: {status_emoji} {status_text}"
+        
+        # Если поставщик отклонен и есть причина отклонения, показываем её
+        if status == "rejected" and supplier.get("rejection_reason"):
+            text += f"\n\n❗ Причина отклонения: {supplier.get('rejection_reason')}"
+    
+    logging.info(f"Фотографии поставщика: {photos}")
+    
+    # Получаем пути ко всем фотографиям
+    photo_paths = []
+    for photo in photos:
+        relative_path = photo.get('file_path')
+        if relative_path:
+            try:
+                full_path = await local_storage_service.get_file_path(relative_path)
+                if full_path and os.path.exists(full_path):
+                    photo_paths.append(full_path)
+            except Exception as e:
+                logging.error(f"Ошибка при получении пути к фото: {e}")
+    
+    # Получаем путь к видео, если оно есть
+    video_path = None
+    if video and include_video:
+        video_info = video
+        logging.info(f"Начинаем обработку видео: {video_info}")
+        if isinstance(video_info, dict):
+            relative_path = video_info.get('storage_path')
+            if not relative_path:
+                relative_path = video_info.get('file_path')
+            logging.info(f"Относительный путь к видео: {relative_path}")
+            if relative_path:
+                try:
+                    video_path = await local_storage_service.get_file_path(relative_path)
+                    logging.info(f"Полный путь к видео: {video_path}")
+                    if not video_path or not os.path.exists(video_path):
+                        logging.error(f"Видеофайл не найден по пути {video_path}")
+                        video_path = None
+                except Exception as e:
+                    logging.error(f"Ошибка при получении пути к видео: {e}")
+                    video_path = None
+    
+    logging.info(f"Итоговый путь к видео: {video_path}")
+    logging.info(f"Видео будет включено в группу: {include_video and video_path is not None}")
+    
+    # Если есть message_id и нет фото и видео, то редактируем текстовое сообщение
+    if message_id and not photo_paths and not video_path:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {"keyboard_message_id": message_id, "media_message_ids": []}
+        except Exception as e:
+            logging.error(f"Ошибка при редактировании сообщения: {e}")
+            # Если не удалось отредактировать, отправляем новое
+            message_id = None
+    
+    # Если фотографий больше одной или есть фото и видео, отправляем их группой
+    if len(photo_paths) > 1 or (photo_paths and video_path and include_video):
+        logging.info(f"Отправляем медиа-группу. Фото: {len(photo_paths)}, Видео: {video_path is not None}")
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Создаем список медиа-объектов
+            media = []
+            
+            # Добавляем все фотографии
+            for i, photo_path in enumerate(photo_paths):
+                # Для первой фотографии добавляем подпись, если нет видео
+                # Если есть видео, добавим подпись к нему (оно будет последним)
+                caption = text if (i == 0 and not video_path) else None
+                media.append(InputMediaPhoto(
+                    media=FSInputFile(photo_path),
+                    caption=caption
+                ))
+            
+            # Добавляем видео в конец группы, если оно есть
+            if video_path and include_video:
+                logging.info(f"Добавляем видео в медиа-группу: {video_path}")
+                # Если мы добавляем видео последним, то подпись идет на нем
+                # Удаляем подпись с первого фото
+                if len(media) > 0:
+                    media[0].caption = None
+                
+                media.append(InputMediaVideo(
+                    media=FSInputFile(video_path),
+                    caption=text
+                ))
+                logging.info("Видео успешно добавлено в медиа-группу")
+            
+            # Отправляем медиа-группу
+            media_messages = await bot.send_media_group(
+                chat_id=chat_id,
+                media=media
+            )
+            
+            # Сохраняем ID всех сообщений медиагруппы
+            media_message_ids = [msg.message_id for msg in media_messages]
+            
+            # Готовим клавиатуру с кнопкой 'Посмотреть отзывы' (если это InlineKeyboardMarkup)
+            supplier_id = supplier.get('id')
+            if isinstance(keyboard, InlineKeyboardMarkup):
+                # Копируем существующую клавиатуру
+                new_keyboard = []
+                # Кнопки 'Отзывы' и 'В избранное' в одном ряду
+                review_button = InlineKeyboardButton(
+                    text="Отзывы",
+                    callback_data=f"show_reviews:{supplier_id}"
+                )
+                favorite_button = InlineKeyboardButton(
+                    text="В избранное",
+                    callback_data=f"add_to_favorites:{supplier_id}"
+                )
+                new_keyboard.append([review_button, favorite_button])
+                # Добавляем остальные кнопки
+                for row in keyboard.inline_keyboard:
+                    new_keyboard.append(row)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+
+            # Для медиагруппы отправляем клавиатуру отдельным сообщением
+            if keyboard:
+                keyboard_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text="Используйте кнопки для навигации:",
+                    reply_markup=keyboard
+                )
+                return {
+                    "keyboard_message_id": keyboard_message.message_id,
+                    "media_message_ids": media_message_ids
+                }
+            else:
+                return {
+                    "keyboard_message_id": None,
+                    "media_message_ids": media_message_ids
+                }
+                
+        except Exception as e:
+            logging.error(f"Ошибка при отправке медиа-группы: {e}")
+            # Если не удалось отправить медиа, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
+    # Если есть только одна фотография, отправляем её с текстом и клавиатурой
+    elif len(photo_paths) == 1:
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно фото с текстом и клавиатурой
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=FSInputFile(photo_paths[0]),
+                caption=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": message.message_id,
+                "media_message_ids": [message.message_id]
+            }
+        except Exception as e:
+            logging.error(f"Ошибка при отправке фотографии: {e}")
+            # Если не удалось отправить фото, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
+    # Если есть только видео, отправляем его с текстом и клавиатурой
+    elif video_path:
+        logging.info(f"Отправляем только видео: {video_path}")
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно видео с текстом и клавиатурой
+            message = await bot.send_video(
+                chat_id=chat_id,
+                video=FSInputFile(video_path),
+                caption=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": message.message_id,
+                "media_message_ids": [message.message_id]
+            }
+        except Exception as e:
+            logging.error(f"Ошибка при отправке видео: {e}")
+            # Выводим трассировку ошибки для отладки
+            import traceback
+            logging.error(f"Трассировка: {traceback.format_exc()}")
+            # Если не удалось отправить видео, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
+    else:
+        supplier_id = supplier.get('id')
+        if isinstance(keyboard, InlineKeyboardMarkup):
+            new_keyboard = []
+            review_button = InlineKeyboardButton(
+                text="Отзывы",
+                callback_data=f"show_reviews:{supplier_id}"
+            )
+            favorite_button = InlineKeyboardButton(
+                text="В избранное",
+                callback_data=f"add_to_favorites:{supplier_id}"
+            )
+            new_keyboard.append([review_button, favorite_button])
+            for row in keyboard.inline_keyboard:
+                new_keyboard.append(row)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+        message = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=keyboard
+        )
+        return {
+            "keyboard_message_id": message.message_id,
+            "media_message_ids": []
+        }
+
+async def send_request_card(
+    bot: Bot,
+    chat_id: int, 
+    request: dict, 
+    keyboard: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None, 
+    message_id: Optional[int] = None,
+    include_video: bool = True,  # Параметр для включения видео в группу
+    show_status: bool = False,    # Параметр для отображения статуса заявки
+    matches_count: Optional[int] = None  # Новый параметр для количества откликов
+) -> dict:
+    """
+    Отправляет или редактирует карточку заявки в указанный чат.
+    
+    Args:
+        bot (Bot): Объект бота для отправки сообщений
+        chat_id (int): ID чата для отправки
+        request (dict): Словарь с данными о заявке
+        keyboard (Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]]): Клавиатура для сообщения
+        message_id (Optional[int]): ID сообщения для редактирования (если None, то отправляется новое)
+        include_video (bool): Включать ли видео в медиа-группу (если True и есть несколько фото)
+        show_status (bool): Показывать ли статус заявки
+        matches_count (Optional[int]): Количество принятых откликов на заявку
+        
+    Returns:
+        dict: Словарь с message_ids всех отправленных сообщений:
+            - keyboard_message_id: ID сообщения с клавиатурой
+            - media_message_ids: список ID сообщений медиагруппы или ID сообщения с фото
+    """
+    # Получаем информацию о категории
+    category_name = request.get('category_name', 'Не указана')
+    main_category_name = request.get('main_category_name', '')
+    
+    category_info = []
+    if main_category_name:
+        category_info.append(main_category_name)
+    if category_name:
+        category_info.append(category_name)
+    
+    category_text = " > ".join(category_info) if category_info else "Не указана"
+    
+    # Описание
+    description = request.get('description', 'Не указано')
+    
+    # Контактная информация
+    contacts = []
+    if request.get('contact_username'):
+        contacts.append(f"Telegram: {request.get('contact_username')}")
+    if request.get('contact_phone'):
+        contacts.append(f"Телефон: {request.get('contact_phone')}")
+    if request.get('contact_email'):
+        contacts.append(f"Email: {request.get('contact_email')}")
+    
+    contact_info = "\n".join(contacts) if contacts else "Контактная информация не указана"
+    
+    # Фотографии и видео (если есть)
+    photos = request.get('photos', [])
+    video = request.get('video')
+    
+    # Добавляем подробное логирование для отладки медиа
+    logging.info(f"Данные по медиа заявки {request.get('id')}:")
+    logging.info(f"Фотографии: {len(photos) if photos else 0} шт.")
+    logging.info(f"Наличие видео: {video is not None}")
+    if video:
+        logging.info(f"Подробные данные видео: {video}")
+    
+    media_info = []
+    if photos:
+        media_info.append(f"Фотографий: {len(photos)}")
+    if video:
+        media_info.append("Видео: имеется")
+    
+    media_text = ", ".join(media_info) if media_info else "Медиа: отсутствуют"
+    
+    # Собираем полный текст сообщения
+    text = f"📝 Заявка #{request.get('id', '')}\n\n"
+    text += f"Категория: {category_text}\n\n"
+    text += f"Описание:\n{description}\n\n"
+    text += f"Контакты:\n{contact_info}\n\n"
+    text += f"{media_text}"
+    
+    # Создание даты
+    created_at = request.get('created_at')
+    if created_at:
+        # Форматируем дату
+        if isinstance(created_at, str):
+            try:
+                from datetime import datetime
+                created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                text += f"\n\nСоздано: {created_at.strftime('%d.%m.%Y %H:%M')}"
+            except:
+                text += f"\n\nСоздано: {created_at}"
+        else:
+            text += f"\n\nСоздано: {created_at}"
+    
+    # Добавляем информацию о статусе заявки, если запрошено
+    if show_status:
+        status = request.get('status', 'pending')
+        if status == "approved":
+            status_emoji = "✅"
+            status_text = "Одобрена"
+        elif status == "rejected":
+            status_emoji = "❌"
+            status_text = "Отклонена"
+        elif status == "closed":
+            status_emoji = "✅"
+            status_text = "Сделка завершена"
+        else:
+            status_emoji = "⏳"
+            status_text = "На проверке"
+        text += f"\n\nСтатус: {status_emoji} {status_text}"
+        
+        # Если заявка отклонена и есть причина отклонения, показываем её
+        if status == "rejected" and request.get("rejection_reason"):
+            text += f"\n\n❗ Причина отклонения: {request.get('rejection_reason')}"
+        
+        # Если заявка одобрена и передано количество откликов, показываем его
+        if status == "approved" and matches_count is not None:
+            text += f"\n\n📬 Количество откликов: {matches_count}"
+    
+    logging.info(f"Фотографии заявки: {photos}")
+    
+    # Результат, который будет возвращен функцией
+    result = {
+        "keyboard_message_id": None,
+        "media_message_ids": []
+    }
+    
+    # Получаем пути ко всем фотографиям
+    photo_paths = []
+    logging.info(f"Начинаю обработку фотографий для заявки {request.get('id')}")
+    for i, photo in enumerate(photos):
+        logging.info(f"Обработка фото {i+1}: {photo}")
+        if not isinstance(photo, dict):
+            logging.error(f"Фото {i+1} имеет неверный формат: {photo}")
+            continue
+        
+        relative_path = photo.get('file_path')
+        if not relative_path:
+            logging.error(f"Фото {i+1} не содержит поле file_path: {photo}")
+            # Пробуем использовать storage_path, если file_path отсутствует
+            relative_path = photo.get('storage_path')
+            if not relative_path:
+                logging.error(f"Фото {i+1} не содержит ни file_path, ни storage_path, пропускаем")
+                continue
+            logging.info(f"Используем storage_path вместо file_path: {relative_path}")
+        
+        try:
+            full_path = await local_storage_service.get_file_path(relative_path)
+            logging.info(f"Полный путь к фото {i+1}: {full_path}")
+            if full_path and os.path.exists(full_path):
+                photo_paths.append(full_path)
+                logging.info(f"Фото {i+1} успешно добавлено в список для отправки")
+            else:
+                logging.error(f"Файл не существует по пути: {full_path}")
+        except Exception as e:
+            logging.error(f"Ошибка при получении пути к фото {i+1}: {e}")
+    
+    # Получаем путь к видео, если оно есть
+    video_path = None
+    if video and include_video:
+        video_info = video
+        logging.info(f"Начинаем обработку видео: {video_info}")
+        if isinstance(video_info, dict):
+            relative_path = video_info.get('storage_path')
+            if not relative_path:
+                relative_path = video_info.get('file_path')
+            logging.info(f"Относительный путь к видео: {relative_path}")
+            if relative_path:
+                try:
+                    video_path = await local_storage_service.get_file_path(relative_path)
+                    logging.info(f"Полный путь к видео: {video_path}")
+                    if not video_path or not os.path.exists(video_path):
+                        logging.error(f"Видеофайл не найден по пути {video_path}")
+                        video_path = None
+                except Exception as e:
+                    logging.error(f"Ошибка при получении пути к видео: {e}")
+                    video_path = None
+    
+    logging.info(f"Итоговый путь к видео: {video_path}")
+    logging.info(f"Видео будет включено в группу: {include_video and video_path is not None}")
+    
+    # Если есть несколько фотографий, отправляем медиа-группу
+    if len(photo_paths) > 1:
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Создаем медиа-группу из фотографий
+            media = [InputMediaPhoto(media=FSInputFile(path)) for path in photo_paths[:9]]  # Максимум 10 фото в группе
+            
+            # Добавляем подпись только к первому фото, чтобы избежать ошибки с дублирующимися подписями
+            media[0] = InputMediaPhoto(
+                media=FSInputFile(photo_paths[0]),
+                caption=text
+            )
+            
+            # Добавляем видео в медиа-группу, если оно есть
+            if video_path and include_video:
+                logging.info(f"Добавляем видео в группу: {video_path}")
+                media.append(InputMediaVideo(
+                    media=FSInputFile(video_path),
+                    caption=text
+                ))
+                logging.info("Видео успешно добавлено в медиа-группу")
+            
+            # Отправляем медиа-группу
+            media_messages = await bot.send_media_group(
+                chat_id=chat_id,
+                media=media
+            )
+            
+            # Сохраняем все ID медиа-сообщений
+            result["media_message_ids"] = [msg.message_id for msg in media_messages]
+            
+            # Готовим клавиатуру с кнопкой 'Посмотреть отзывы' (если это InlineKeyboardMarkup)
+            supplier_id = request.get('id')
+            if isinstance(keyboard, InlineKeyboardMarkup):
+                # Копируем существующую клавиатуру
+                new_keyboard = []
+                # Кнопка 'Посмотреть отзывы'
+                review_button = InlineKeyboardButton(
+                    text="Посмотреть отзывы",
+                    callback_data=f"show_reviews:{supplier_id}"
+                )
+                new_keyboard.append([review_button])
+                # Добавляем остальные кнопки
+                for row in keyboard.inline_keyboard:
+                    new_keyboard.append(row)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+
+            # Для медиагруппы отправляем клавиатуру отдельным сообщением
+            if keyboard:
+                keyboard_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text="Используйте кнопки для навигации:",
+                    reply_markup=keyboard
+                )
+                result["keyboard_message_id"] = keyboard_message.message_id
+            
+            return result
+                
+        except Exception as e:
+            logging.error(f"Ошибка при отправке медиа-группы: {e}")
+            # Если не удалось отправить медиа, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
+    # Если есть только одна фотография, отправляем её с текстом и клавиатурой
+    elif len(photo_paths) == 1:
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно фото с текстом и клавиатурой
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=FSInputFile(photo_paths[0]),
+                caption=text,
+                reply_markup=keyboard
+            )
+            result["keyboard_message_id"] = message.message_id
+            result["media_message_ids"] = [message.message_id]
+            return result
+        except Exception as e:
+            logging.error(f"Ошибка при отправке фотографии: {e}")
+            # Если не удалось отправить фото, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
+    # Если есть только видео, отправляем его с текстом и клавиатурой
+    elif video_path:
+        logging.info(f"Отправляем только видео: {video_path}")
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно видео с текстом и клавиатурой
+            message = await bot.send_video(
+                chat_id=chat_id,
+                video=FSInputFile(video_path),
+                caption=text,
+                reply_markup=keyboard
+            )
+            result["keyboard_message_id"] = message.message_id
+            result["media_message_ids"] = [message.message_id]
+            return result
+        except Exception as e:
+            logging.error(f"Ошибка при отправке видео: {e}")
+            # Выводим трассировку ошибки для отладки
+            import traceback
+            logging.error(f"Трассировка: {traceback.format_exc()}")
+            # Если не удалось отправить видео, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
+    else:
+        # Если нет фото и видео, отправляем текстовое сообщение с клавиатурой
+        message = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=keyboard
+        )
+        result["keyboard_message_id"] = message.message_id
+        result["media_message_ids"] = [message.message_id]
+        return result
+
+async def send_review_card(
+    bot: Bot,
+    chat_id: int,
+    reviews: list,
+    current_index: int,
+    keyboard: Optional[InlineKeyboardMarkup] = None,
+    message_id: Optional[int] = None
+) -> int:
+    """
+    Отправляет или редактирует карточку отзыва с навигацией и кнопкой назад.
+    Возвращает message_id отправленного или отредактированного сообщения.
+    """
+    if not reviews:
+        text = "Отзывов пока нет."
+    else:
+        review = reviews[current_index]
+        mark = review['mark']
+        # Эмоджи по оценке
+        mark_emoji = {
+            1: '😡',
+            2: '😞',
+            3: '😐',
+            4: '🙂',
+            5: '🤩',
+        }.get(mark, '⭐')
+        review_text = review.get('text')
+        if not review_text:
+            review_text = ''
+        text = f"{mark_emoji} Оценка: {mark}\n\n" \
+               f"{review_text}\n\n" \
+               f"Дата: {review['created_at'].strftime('%d.%m.%Y %H:%M') if hasattr(review['created_at'], 'strftime') else review['created_at']}\n"
+
+    # Кнопки навигации и назад
+    nav_buttons = []
+    if reviews and len(reviews) > 1:
+        nav_row = []
+        if current_index > 0:
+            nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"review_prev:{current_index-1}"))
+        nav_row.append(InlineKeyboardButton(text=f"{current_index+1}/{len(reviews)}", callback_data="review_current"))
+        if current_index < len(reviews)-1:
+            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"review_next:{current_index+1}"))
+        nav_buttons.append(nav_row)
+    # Кнопка назад
+    nav_buttons.append([InlineKeyboardButton(text="Назад", callback_data="review_back")])
+    # Собираем клавиатуру
+    markup = InlineKeyboardMarkup(inline_keyboard=nav_buttons)
+
+    # Если передан message_id, пробуем редактировать сообщение
+    if message_id:
+        from app.utils.message_utils import edit_message_text_and_keyboard
+        result = await edit_message_text_and_keyboard(
+            bot=bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=markup
+        )
+        if result:
+            return message_id
+    # Если не удалось отредактировать или message_id не передан, отправляем новое сообщение
+    msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+    return msg.message_id
