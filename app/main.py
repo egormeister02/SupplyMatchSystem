@@ -21,6 +21,7 @@ from app.handlers import (
 from app.middlewares import setup_middlewares
 from app.services.database import init_db
 #from app.services.storage import s3_service
+from app.config.logging import app_logger
 
 # Logging setup
 logging.basicConfig(
@@ -54,9 +55,9 @@ setup_middlewares(dp)
 @app.before_serving
 async def startup():
     """Actions to perform on application startup"""
-    logger.info("Starting application...")
+    app_logger.info("Starting application...")
     
-    # Database initialization
+    
     db_ready = await init_db()
     if not db_ready:
         logger.error("Failed to initialize database. Shutting down.")

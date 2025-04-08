@@ -1,30 +1,20 @@
-DROP TABLE IF EXISTS favorites CASCADE;
-DROP TABLE IF EXISTS matches CASCADE;
-DROP TABLE IF EXISTS files CASCADE;
-DROP TABLE IF EXISTS requests CASCADE;
-DROP TABLE IF EXISTS suppliers CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-DROP TABLE IF EXISTS help_requests CASCADE;
-DROP TABLE IF EXISTS reviews CASCADE;
---DROP TABLE IF EXISTS main_categories CASCADE;
---DROP TABLE IF EXISTS categories CASCADE;
-
-CREATE TABLE IF NOT EXISTS main_categories (
+-- Create main_categories table
+CREATE TABLE main_categories (
     name VARCHAR(255) NOT NULL UNIQUE PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS categories (
+-- Create categories table
+CREATE TABLE categories (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     main_category_name VARCHAR(255) NOT NULL,
-
     FOREIGN KEY (main_category_name) REFERENCES main_categories(name)
 );
 
--- Таблица для пользователей
-CREATE TABLE IF NOT EXISTS users (
+-- Create users table
+CREATE TABLE users (
     tg_id BIGINT UNIQUE NOT NULL,
-    username VARCHAR(255),
+    username VARCHAR(255) CHECK (username IS NULL OR username LIKE '@%'),
     first_name VARCHAR(255),
     last_name VARCHAR(255),
     phone VARCHAR(255) CHECK (phone IS NULL OR LENGTH(phone) >= 10),
@@ -33,8 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Таблица для поставщиков
-CREATE TABLE IF NOT EXISTS suppliers (
+-- Create suppliers table
+CREATE TABLE suppliers (
     id SERIAL PRIMARY KEY,
     company_name VARCHAR(255) NOT NULL,
     product_name VARCHAR(255) NOT NULL,
@@ -44,11 +34,11 @@ CREATE TABLE IF NOT EXISTS suppliers (
     region VARCHAR(255),
     city VARCHAR(255),
     address VARCHAR(255),
+    contact_username VARCHAR(255) CHECK (contact_username IS NULL OR contact_username LIKE '@%'),
     contact_phone VARCHAR(255),
     contact_email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     status VARCHAR(255) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
-    website VARCHAR(255),
     created_by_id INTEGER,
     tarrif VARCHAR(255),
 
@@ -56,21 +46,20 @@ CREATE TABLE IF NOT EXISTS suppliers (
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
--- Таблица для запросов
-CREATE TABLE IF NOT EXISTS requests (
+-- Create requests table
+CREATE TABLE requests (
     id SERIAL PRIMARY KEY,
     category_id INTEGER,
     description TEXT,
     created_by_id INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
-
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
--- Таблица для файлов
-CREATE TABLE IF NOT EXISTS files (
+-- Create files table
+CREATE TABLE files (
     id SERIAL PRIMARY KEY,
     type VARCHAR(50) NOT NULL,
     file_path VARCHAR(255) NOT NULL,
@@ -83,8 +72,8 @@ CREATE TABLE IF NOT EXISTS files (
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
--- Таблица для откликов (совпадений)
-CREATE TABLE IF NOT EXISTS matches (
+-- Create matches table
+CREATE TABLE matches (
     id SERIAL PRIMARY KEY,
     request_id INTEGER REFERENCES requests(id) NOT NULL,
     supplier_id INTEGER REFERENCES suppliers(id) NOT NULL,
@@ -92,37 +81,36 @@ CREATE TABLE IF NOT EXISTS matches (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Таблица для избранных поставщиков
-CREATE TABLE IF NOT EXISTS favorites (
+-- Create favorites table
+CREATE TABLE favorites (
     id SERIAL PRIMARY KEY,
     user_id BIGINT,
     supplier_id INTEGER,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE (user_id, supplier_id),
-
     FOREIGN KEY (user_id) REFERENCES users(tg_id),
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
-CREATE TABLE IF NOT EXISTS help_requests (
+-- Create help_requests table
+CREATE TABLE help_requests (
     id SERIAL PRIMARY KEY,
     user_id BIGINT,
     request TEXT NOT NULL,
     status VARCHAR(50) CHECK (status IN ('pending', 'answered', 'closed')) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT NOW(),
-
     FOREIGN KEY (user_id) REFERENCES users(tg_id)
 );
 
-CREATE TABLE IF NOT EXISTS reviews (
+-- Create reviews table
+CREATE TABLE reviews (
     id SERIAL PRIMARY KEY,
     match_id INTEGER,
     author_id BIGINT,
     review_id BIGINT,
     review TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
-
     FOREIGN KEY (match_id) REFERENCES matches(id),
     FOREIGN KEY (author_id) REFERENCES users(tg_id),
     FOREIGN KEY (review_id) REFERENCES users(tg_id)
-);
+); 

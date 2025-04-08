@@ -52,7 +52,7 @@ def get_main_user_menu_keyboard():
 
 # Универсальные функции для кнопок "Назад"
 
-def get_back_button(back_target, is_state=True, button_text="Назад"):
+def get_back_button(back_target, is_state=True, button_text="Назад", state_group=None):
     """
     Универсальная кнопка "Назад", которая работает как с состояниями, так и с действиями
     
@@ -60,14 +60,36 @@ def get_back_button(back_target, is_state=True, button_text="Назад"):
         back_target (str): Имя состояния или действия для возврата
         is_state (bool): True, если это состояние, False, если действие
         button_text (str): Текст на кнопке, по умолчанию "Назад"
+        state_group (str, optional): Название группы состояний (например, "RegistrationStates", "SupplierCreationStates")
+                                    Если None и is_state=True, автоматически определит группу из имени состояния
     
     Returns:
         InlineKeyboardButton: Кнопка "Назад" с соответствующим callback_data
     """
-    prefix = "back_to_state:" if is_state else "back_to_action:"
-    return InlineKeyboardButton(text=button_text, callback_data=f"{prefix}{back_target}")
+    if is_state:
+        # Если группа не указана, используем значение по умолчанию
+        if state_group is None:
+            # Определяем группу по имени состояния
+            if back_target.startswith("waiting_"):
+                # Для состояния waiting_phone проверяем, относится ли оно к SupplierCreationStates
+                # или RegistrationStates на основе контекста и имени
+                if back_target in ["waiting_phone", "waiting_email", "waiting_contact"]:
+                    # Эти состояния могут быть как в SupplierCreationStates, так и в RegistrationStates
+                    state_group = "SupplierCreationStates"
+                else:
+                    # Для других состояний предполагаем, что они в SupplierCreationStates
+                    state_group = "SupplierCreationStates"
+            else:
+                # Для других форматов имен состояний предполагаем, что они в RegistrationStates
+                state_group = "RegistrationStates"
+        
+        callback_data = f"back_to_state:{state_group}:{back_target}"
+    else:
+        callback_data = f"back_to_action:{back_target}"
+    
+    return InlineKeyboardButton(text=button_text, callback_data=callback_data)
 
-def get_back_keyboard(back_target, is_state=True, button_text="Назад"):
+def get_back_keyboard(back_target, is_state=True, button_text="Назад", state_group=None):
     """
     Универсальная клавиатура только с кнопкой "Назад", работающая как с состояниями, так и с действиями
     
@@ -75,17 +97,18 @@ def get_back_keyboard(back_target, is_state=True, button_text="Назад"):
         back_target (str): Имя состояния или действия для возврата
         is_state (bool): True, если это состояние, False, если действие
         button_text (str): Текст на кнопке, по умолчанию "Назад"
+        state_group (str, optional): Название группы состояний (например, "RegistrationStates", "SupplierCreationStates")
     
     Returns:
         InlineKeyboardMarkup: Клавиатура с кнопкой "Назад"
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [get_back_button(back_target, is_state, button_text)]
+            [get_back_button(back_target, is_state, button_text, state_group)]
         ]
     )
 
-def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, button_text="Назад"):
+def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, button_text="Назад", state_group=None):
     """
     Универсальная функция для создания клавиатуры с кнопками и кнопкой "Назад"
     
@@ -95,6 +118,7 @@ def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, but
         is_state (bool): True, если это состояние, False, если действие
         row_width (int): Количество кнопок в строке (кроме кнопки "Назад")
         button_text (str): Текст на кнопке "Назад", по умолчанию "Назад"
+        state_group (str, optional): Название группы состояний (например, "RegistrationStates", "SupplierCreationStates")
     
     Returns:
         InlineKeyboardMarkup: Клавиатура с кнопками и кнопкой "Назад"
@@ -112,7 +136,7 @@ def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, but
         keyboard.append(row)
     
     # Add back button in the last row
-    keyboard.append([get_back_button(back_target, is_state, button_text)])
+    keyboard.append([get_back_button(back_target, is_state, button_text, state_group)])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

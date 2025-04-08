@@ -7,7 +7,6 @@ from aiogram.types import InlineKeyboardButton, KeyboardButton, ReplyKeyboardMar
 from aiogram.fsm.context import FSMContext
 from app.keyboards.inline import (
     get_back_keyboard,
-    get_keyboard_with_back,
     get_back_button,
 )
 
@@ -16,18 +15,6 @@ from app.services import get_db_session, DBService
 
 # Вспомогательные функции для формирования текстов
 def format_numbered_list(items, start_text="", item_formatter=lambda i, idx: f"{idx}. {i}"):
-    """
-    Формирует нумерованный список из предоставленных элементов.
-    
-    Args:
-        items (list): Список элементов для нумерации
-        start_text (str): Начальный текст перед списком
-        item_formatter (callable): Функция форматирования для каждого элемента
-            Принимает элемент и его индекс, возвращает строку
-    
-    Returns:
-        str: Форматированный текст с нумерованным списком
-    """
     result = start_text + "\n\n" if start_text else ""
     
     for idx, item in enumerate(items, 1):
@@ -36,15 +23,6 @@ def format_numbered_list(items, start_text="", item_formatter=lambda i, idx: f"{
     return result
 
 async def get_categories_text(state: FSMContext = None):
-    """
-    Получает и форматирует список категорий.
-    
-    Args:
-        state (FSMContext, optional): Контекст состояния для сохранения категорий
-    
-    Returns:
-        str: Форматированный текст со списком категорий
-    """
     async with get_db_session() as session:
         db_service = DBService(session)
         main_categories = await db_service.get_main_categories()
@@ -59,17 +37,6 @@ async def get_categories_text(state: FSMContext = None):
     )
 
 async def get_subcategories_text(category_name, state: FSMContext = None):
-    """
-    Получает и форматирует список подкатегорий для указанной категории.
-    
-    Args:
-        category_name (str): Название категории
-        state (FSMContext, optional): Контекст состояния для сохранения подкатегорий
-    
-    Returns:
-        str: Форматированный текст со списком подкатегорий
-        bool: Успешность получения подкатегорий
-    """
     async with get_db_session() as session:
         db_service = DBService(session)
         subcategories = await db_service.get_subcategories(category_name)
@@ -98,7 +65,7 @@ registration_config = {
     # Состояние ожидания фамилии
     RegistrationStates.waiting_last_name: {
         "text": "Теперь введите вашу фамилию:",
-        "markup": get_back_keyboard("waiting_first_name", is_state=True, button_text="Изменить имя"),
+        "markup": get_back_keyboard("waiting_first_name", is_state=True, button_text="Изменить имя", state_group="RegistrationStates"),
         "back_state": RegistrationStates.waiting_first_name,
     },
     
@@ -107,8 +74,8 @@ registration_config = {
         "text": "Теперь введите ваш email:",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
-                [get_back_button("waiting_contact", is_state=True, button_text="Пропустить")],
-                [get_back_button("waiting_last_name", is_state=True, button_text="Изменить фамилию")]
+                [get_back_button("waiting_contact", is_state=True, button_text="Пропустить", state_group="RegistrationStates")],
+                [get_back_button("waiting_last_name", is_state=True, button_text="Изменить фамилию", state_group="RegistrationStates")]
             ]
         ),
         "back_state": RegistrationStates.waiting_last_name,
@@ -137,8 +104,8 @@ registration_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Подтвердить", callback_data="confirm")],
-                [get_back_button("waiting_first_name", is_state=True, button_text="Изменить данные")],
-                [get_back_button("waiting_contact", is_state=True, button_text="Назад к вводу контакта")]
+                [get_back_button("waiting_first_name", is_state=True, button_text="Изменить данные", state_group="RegistrationStates")],
+                [get_back_button("waiting_contact", is_state=True, button_text="Назад к вводу контакта", state_group="RegistrationStates")]
             ]
         ),
         "back_state": RegistrationStates.waiting_contact,
@@ -151,21 +118,21 @@ supplier_creation_config = {
     SupplierCreationStates.waiting_company_name: {
         "text": "Введите название вашей компании:",
         "markup": get_back_keyboard("suppliers", is_state=False, button_text="Вернуться к меню поставщиков"),
-        "back_state": None,  # Возврат в главное меню
+        "back_state": None,
     },
     
     # Выбор основной категории
     SupplierCreationStates.waiting_main_category: {
-        "text_func": get_categories_text,  # Функция для динамического формирования текста
-        "markup": get_back_keyboard("waiting_company_name", is_state=True, button_text="Изменить название компании"),
-        "back_state": SupplierCreationStates.waiting_product_name,
+        "text_func": get_categories_text,
+        "markup": get_back_keyboard("waiting_company_name", is_state=True, button_text="Изменить название компании", state_group="SupplierCreationStates"),
+        "back_state": SupplierCreationStates.waiting_company_name,
         "error_text": "Пожалуйста, введите корректный номер категории из списка.",
     },
     
     # Выбор подкатегории
     SupplierCreationStates.waiting_subcategory: {
-        "text_func": get_subcategories_text,  # Функция для динамического формирования текста
-        "markup": get_back_keyboard("waiting_main_category", is_state=True, button_text="Выбрать другую категорию"),
+        "text_func": get_subcategories_text,
+        "markup": get_back_keyboard("waiting_main_category", is_state=True, button_text="Выбрать другую категорию", state_group="SupplierCreationStates"),
         "back_state": SupplierCreationStates.waiting_main_category,
         "error_text": "Пожалуйста, введите корректный номер подкатегории из списка.",
     },
@@ -173,8 +140,110 @@ supplier_creation_config = {
     # Ввод названия продукта
     SupplierCreationStates.waiting_product_name: {
         "text": "Введите название вашего основного продукта или услуги:",
-        "markup": get_back_keyboard("waiting_subcategory", is_state=True, button_text="Назад к подкатегории"),
-        "back_state": SupplierCreationStates.waiting_company_name,
+        "markup": get_back_keyboard("waiting_subcategory", is_state=True, button_text="Назад к подкатегории", state_group="SupplierCreationStates"),
+        "back_state": SupplierCreationStates.waiting_subcategory,
+    },
+
+    # Ввод описания продукта
+    SupplierCreationStates.waiting_description: {
+        "text": "Введите подробное описание вашего продукта или услуги:",
+        "markup": get_back_keyboard("waiting_product_name", is_state=True, button_text="Назад к названию продукта", state_group="SupplierCreationStates"),
+        "back_state": SupplierCreationStates.waiting_product_name,
+    },
+
+    # Ввод местоположения
+    SupplierCreationStates.waiting_location: {
+        "text": "Введите информацию о местоположении.\n"
+                "Вы можете ввести:\n"
+                "1. Только страну\n"
+                "2. Страну и регион\n"
+                "3. Страну, регион и город\n"
+                "4. Полный адрес (страна, регион, город, адрес)\n\n"
+                "Адресс без запятых",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_description", is_state=True, button_text="Назад к описанию", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_additional_photos", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_description,
+    },
+
+    # Загрузка дополнительных фото
+    SupplierCreationStates.waiting_additional_photos: {
+        "text": "Загрузите фотографии вашего продукта (максимум 8 штук).\n"
+                "Вы можете отправить несколько фото в одном сообщении.\n"
+                "После загрузки фото вы можете загрузить еще или перейти к следующему шагу:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_video", is_state=True, button_text="Продолжить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_location", is_state=True, button_text="Назад к местоположению", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_location,
+    },
+
+    # Загрузка видео
+    SupplierCreationStates.waiting_video: {
+        "text": "Вы можете загрузить видео о вашем продукте или компании.\n"
+                "Нажмите 'Пропустить' чтобы перейти к следующему шагу:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_tg_username", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_additional_photos", is_state=True, button_text="Назад к фотографиям", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_additional_photos,
+    },
+    
+    # Ввод контактного Telegram username
+    SupplierCreationStates.waiting_tg_username: {
+        "text": "Введите Telegram username для связи.\n"
+               "Это может быть ваш username или другой контакт:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать мой", callback_data="use_my_username")],
+                [get_back_button("waiting_video", is_state=True, button_text="Назад к видео", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_phone", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_video,
+    },
+    
+    # Ввод контактного телефона
+    SupplierCreationStates.waiting_phone: {
+        "text": "Введите контактный телефон в международном формате.\n"
+               "Вы можете поделиться своим номером, ввести его вручную или пропустить этот шаг:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать из профиля", callback_data="use_profile_phone")],
+                [InlineKeyboardButton(text="Поделиться контактом", callback_data="share_contact")],
+                [get_back_button("waiting_email", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_tg_username", is_state=True, button_text="Назад к username", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "share_contact_markup": ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Поделиться своим", request_contact=True)],
+                [KeyboardButton(text="Отмена")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        ),
+        "back_state": SupplierCreationStates.waiting_tg_username,
+    },
+    
+    # Ввод контактного email
+    SupplierCreationStates.waiting_email: {
+        "text": "Введите контактный email или выберите другой вариант:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать из профиля", callback_data="use_profile_email")],
+                [InlineKeyboardButton(text="Пропустить", callback_data="skip_email")],
+                [get_back_button("waiting_phone", is_state=True, button_text="Назад к телефону", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_phone,
     },
     
     # Подтверждение создания поставщика
@@ -183,11 +252,11 @@ supplier_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Подтвердить", callback_data="confirm")],
-                [get_back_button("waiting_company_name", is_state=True, button_text="Изменить данные")],
-                [get_back_button("waiting_product_name", is_state=True, button_text="Назад к названию продукта")]
+                [get_back_button("waiting_company_name", is_state=True, button_text="Изменить данные", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_email", is_state=True, button_text="Назад к email", state_group="SupplierCreationStates")]
             ]
         ),
-        "back_state": SupplierCreationStates.waiting_subcategory,
+        "back_state": SupplierCreationStates.waiting_email,
     },
 }
 

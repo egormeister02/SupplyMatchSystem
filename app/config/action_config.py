@@ -28,41 +28,15 @@ action_config = {
             inline_keyboard=[
                 [InlineKeyboardButton(text="Создать поставщика", callback_data="create_supplier")],
                 [InlineKeyboardButton(text="Мои поставщики", callback_data="my_suppliers")],
+                [InlineKeyboardButton(text="База поставщиков", callback_data="suppliers_list")],
                 [InlineKeyboardButton(text="Назад", callback_data="back_to_action:main_menu")]
             ]
         ),
         "parent": "main_menu",
     },
     
-    "suppliers_electronics": {
-        "text": "Поставщики электроники:",
-        "markup": None,  # Будет заполнено после обновления inline.py
-        "parent": "suppliers_list",
-    },
-    
-    "suppliers_food": {
-        "text": "Поставщики продуктов питания:",
-        "markup": None,  # Будет заполнено после обновления inline.py
-        "parent": "suppliers_list",
-    },
-    
-    "requests_list": {
-        "text": "Ваши запросы:",
-        "markup": None,  # Будет заполнено после обновления inline.py
-        "parent": "main_menu",
-    },
-    
     "favorites_list": {
         "text": "Избранные поставщики:",
-        "markup": None,  # Будет заполнено после обновления inline.py
-        "parent": "main_menu",
-    },
-    
-    "help_action": {
-        "text": "Справка по работе с ботом:\n\n"
-                "1. Выберите раздел в главном меню\n"
-                "2. Для возврата назад используйте кнопку 'Назад'\n"
-                "3. Для связи с поддержкой напишите /support",
         "markup": None,  # Будет заполнено после обновления inline.py
         "parent": "main_menu",
     },

@@ -24,26 +24,37 @@ async def cmd_help(message: types.Message):
 async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     """
     Обработчик для кнопки возврата к конкретному состоянию
-    Формат callback_data: back_to_state:{state_name}
-    Например: back_to_state:waiting_email
+    Формат callback_data: back_to_state:{group_name}:{state_name}
+    Например: back_to_state:RegistrationStates:waiting_email
     """
     await callback.answer()
     
-    # Получаем имя состояния из callback_data
-    target_state_name = callback.data.replace("back_to_state:", "")
-    
-    # Импортируем все группы состояний
-    from app.states.states import RegistrationStates, SupplierCreationStates
-    from aiogram.fsm.state import State
-    
-    # Проверяем состояние в обеих группах
     try:
-        # Сначала проверяем в RegistrationStates
-        target_state = getattr(RegistrationStates, target_state_name, None)
+        # Получаем данные из callback_data
+        callback_parts = callback.data.split(':')
+        if len(callback_parts) != 3:
+            await callback.message.answer("Неверный формат данных для возврата к состоянию")
+            return
+            
+        group_name = callback_parts[1]
+        state_name = callback_parts[2]
         
-        # Если не нашли, проверяем в SupplierCreationStates
-        if not isinstance(target_state, State):
-            target_state = getattr(SupplierCreationStates, target_state_name, None)
+        # Импортируем группы состояний
+        from app.states.states import RegistrationStates, SupplierCreationStates
+        from aiogram.fsm.state import State
+        
+        # Определяем группу состояний на основе group_name
+        state_group = None
+        if group_name == "RegistrationStates":
+            state_group = RegistrationStates
+        elif group_name == "SupplierCreationStates":
+            state_group = SupplierCreationStates
+        else:
+            await callback.message.answer(f"Неизвестная группа состояний: {group_name}")
+            return
+            
+        # Получаем состояние из указанной группы
+        target_state = getattr(state_group, state_name, None)
         
         if isinstance(target_state, State):
             # Получаем конфигурацию для целевого состояния
@@ -94,9 +105,9 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
             else:
                 await callback.message.answer("Конфигурация для указанного состояния не найдена")
         else:
-            await callback.message.answer("Невозможно вернуться к указанному шагу")
-    except (AttributeError, ImportError) as e:
-        logging.error(f"Ошибка при возврате к состоянию {target_state_name}: {e}")
+            await callback.message.answer(f"Состояние {state_name} не найдено в группе {group_name}")
+    except Exception as e:
+        logging.error(f"Ошибка при возврате к состоянию: {e}")
         await callback.message.answer("Ошибка при возврате к предыдущему шагу")
 
 def register_handlers(dp):
