@@ -10,11 +10,12 @@ import tempfile
 import os
 import time
 
-from app.services import get_db_session, DBService
+from app.services import get_db_session, DBService, admin_chat_service
 from app.states.states import SupplierCreationStates
 from app.states.state_config import get_state_config
 from app.utils.message_utils import (
     remove_keyboard_from_context,
+    edit_message_text_and_keyboard,
 )
 from app.services.local_storage import local_storage_service
 from app.config.logging import app_logger
@@ -31,6 +32,32 @@ processed_media_groups = {}
 # Словарь для отслеживания сообщений для медиа групп
 media_group_messages = {}
 
+# Вспомогательная функция для проверки режима редактирования
+async def check_if_editing(message: Message, state: FSMContext, attribute_name: str, bot: Bot = None):
+    """
+    Проверяет, находимся ли мы в режиме редактирования атрибута
+    
+    Args:
+        message: Объект сообщения
+        state: Контекст состояния
+        attribute_name: Имя редактируемого атрибута
+        bot: Объект бота для вызова show_supplier_confirmation
+        
+    Returns:
+        bool: True если мы в режиме редактирования и нужно вернуться к подтверждению
+    """
+    state_data = await state.get_data()
+    if state_data.get("editing_attribute") == attribute_name:
+        # Сообщаем об обновлении и возвращаемся к подтверждению
+        await message.answer(f"{attribute_name.replace('_', ' ').capitalize()} обновлен(а).")
+        
+        # Удаляем флаг редактирования, чтобы избежать зацикливания
+        await state.update_data(editing_attribute=None)
+        
+        await show_supplier_confirmation(message, state, bot)
+        return True
+    return False
+
 # Обработчики для ввода данных о поставщике
 @router.message(SupplierCreationStates.waiting_company_name)
 async def process_company_name(message: Message, state: FSMContext, bot: Bot):
@@ -44,6 +71,10 @@ async def process_company_name(message: Message, state: FSMContext, bot: Bot):
         return
     
     await state.update_data(company_name=company_name)
+    
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "company_name", bot):
+        return
     
     main_category_config = get_state_config(SupplierCreationStates.waiting_main_category)
     
@@ -81,6 +112,10 @@ async def process_main_category(message: Message, state: FSMContext, bot: Bot):
         selected_category = main_categories[category_number - 1]["name"]
         
         await state.update_data(main_category=selected_category)
+        
+        # Проверяем, находимся ли мы в режиме редактирования
+        if await check_if_editing(message, state, "main_category", bot):
+            return
         
         subcategory_config = get_state_config(SupplierCreationStates.waiting_subcategory)
         
@@ -140,6 +175,10 @@ async def process_subcategory(message: Message, state: FSMContext, bot: Bot):
             subcategory_name=selected_subcategory["name"]
         )
         
+        # Проверяем, находимся ли мы в режиме редактирования
+        if await check_if_editing(message, state, "subcategory_name", bot):
+            return
+        
         product_name_config = get_state_config(SupplierCreationStates.waiting_product_name)
         
         await message.answer(
@@ -173,6 +212,10 @@ async def process_product_name(message: Message, state: FSMContext, bot: Bot):
     
     await state.update_data(product_name=product_name)
     
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "product_name", bot):
+        return
+    
     description_config = get_state_config(SupplierCreationStates.waiting_description)
     
     await message.answer(
@@ -195,52 +238,104 @@ async def process_description(message: Message, state: FSMContext, bot: Bot):
     
     await state.update_data(description=description)
     
-    location_config = get_state_config(SupplierCreationStates.waiting_location)
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "description", bot):
+        return
+    
+    # Переходим к вводу страны вместо местоположения
+    country_config = get_state_config(SupplierCreationStates.waiting_country)
     
     await message.answer(
-        location_config["text"],
-        reply_markup=location_config.get("markup")
+        country_config["text"],
+        reply_markup=country_config.get("markup")
     )
     
-    await state.set_state(SupplierCreationStates.waiting_location)
+    await state.set_state(SupplierCreationStates.waiting_country)
 
-
-@router.message(SupplierCreationStates.waiting_location)
-async def process_location(message: Message, state: FSMContext, bot: Bot):
-
-    location_parts = [part.strip() for part in message.text.strip().split(',')]
+@router.message(SupplierCreationStates.waiting_country)
+async def process_country(message: Message, state: FSMContext, bot: Bot):
+    """Обработка ввода страны"""
+    country = message.text.strip()
     
-
-    if not location_parts or len(location_parts) > 4:
-        await message.answer(
-            "Пожалуйста, введите корректную информацию о местоположении.\n"
-            "Вы можете ввести:\n"
-            "1. Только страну\n"
-            "2. Страну, регион\n"
-            "3. Страну, регион, город\n"
-            "4. Полный адрес (страна, регион, город, адрес)\n"
-            "Адресс без запятых"
-        )
+    await remove_keyboard_from_context(bot, message)
+    
+    if len(country) < 2:
+        await message.answer("Название страны должно содержать не менее 2 символов. Пожалуйста, попробуйте еще раз.")
         return
-
-    location_data = {
-        "country": None,
-        "region": None,
-        "city": None,
-        "address": None
-    }
-
-    if len(location_parts) >= 1:
-        location_data["country"] = location_parts[0]
-    if len(location_parts) >= 2:
-        location_data["region"] = location_parts[1]
-    if len(location_parts) >= 3:
-        location_data["city"] = location_parts[2]
-    if len(location_parts) >= 4:
-        location_data["address"] = location_parts[3]
     
-    await state.update_data(**location_data)
+    await state.update_data(country=country)
     
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "country", bot):
+        return
+    
+    # Переходим к вводу региона
+    region_config = get_state_config(SupplierCreationStates.waiting_region)
+    
+    await message.answer(
+        region_config["text"],
+        reply_markup=region_config.get("markup")
+    )
+    
+    await state.set_state(SupplierCreationStates.waiting_region)
+
+@router.message(SupplierCreationStates.waiting_region)
+async def process_region(message: Message, state: FSMContext, bot: Bot):
+    """Обработка ввода региона"""
+    region = message.text.strip()
+    
+    await remove_keyboard_from_context(bot, message)
+    
+    await state.update_data(region=region)
+    
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "region", bot):
+        return
+    
+    # Переходим к вводу города
+    city_config = get_state_config(SupplierCreationStates.waiting_city)
+    
+    await state.set_state(SupplierCreationStates.waiting_city)
+
+
+@router.message(SupplierCreationStates.waiting_city)
+async def process_city(message: Message, state: FSMContext, bot: Bot):
+    """Обработка ввода города"""
+    city = message.text.strip()
+    
+    await remove_keyboard_from_context(bot, message)
+    
+    await state.update_data(city=city)
+    
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "city", bot):
+        return
+    
+    # Переходим к вводу адреса
+    address_config = get_state_config(SupplierCreationStates.waiting_address)
+    
+    await message.answer(
+        address_config["text"],
+        reply_markup=address_config.get("markup")
+    )
+    
+    await state.set_state(SupplierCreationStates.waiting_address)
+
+
+@router.message(SupplierCreationStates.waiting_address)
+async def process_address(message: Message, state: FSMContext, bot: Bot):
+    """Обработка ввода адреса"""
+    address = message.text.strip()
+    
+    await remove_keyboard_from_context(bot, message)
+    
+    await state.update_data(address=address)
+    
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "address", bot):
+        return
+    
+    # Переходим к загрузке фотографий
     photos_config = get_state_config(SupplierCreationStates.waiting_additional_photos)
     
     await message.answer(
@@ -251,6 +346,7 @@ async def process_location(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(SupplierCreationStates.waiting_additional_photos)
     
     await state.update_data(photos=[])
+
 
 @router.message(SupplierCreationStates.waiting_additional_photos, F.photo)
 async def process_photos(message: Message, state: FSMContext, bot: Bot):
@@ -445,6 +541,10 @@ async def process_tg_username(message: Message, state: FSMContext, bot: Bot):
     # Сохраняем username в состояние
     await state.update_data(contact_username=username)
     
+    # Проверяем, находимся ли мы в режиме редактирования
+    if await check_if_editing(message, state, "contact_username", bot):
+        return
+    
     # Сообщаем о получении username
     await message.answer(f"Получен контактный username: {username}")
     
@@ -538,6 +638,10 @@ async def process_phone(message: Message, state: FSMContext, bot: Bot):
     if text.startswith('+') and len(text) > 10:
         # Сохраняем телефон в состояние
         await state.update_data(contact_phone=text)
+        
+        # Проверяем, находимся ли мы в режиме редактирования
+        if await check_if_editing(message, state, "contact_phone", bot):
+            return
         
         # Удаляем клавиатуру и сообщаем о получении телефона
         await message.answer(
@@ -641,11 +745,15 @@ async def process_email(message: Message, state: FSMContext, bot: Bot):
         # Сохраняем email в состояние
         await state.update_data(contact_email=email)
         
+        # Проверяем, находимся ли мы в режиме редактирования
+        if await check_if_editing(message, state, "contact_email", bot):
+            return
+        
         # Сообщаем о получении email
         await message.answer(f"Получен email: {email}")
         
         # Переходим к подтверждению создания поставщика
-        await show_supplier_confirmation(message, state, bot)
+        await show_supplier_confirmation(message, state, bot, is_edit=False)
     else:
         # Неверный формат email
         await message.answer(
@@ -672,32 +780,24 @@ async def use_profile_email(callback: CallbackQuery, state: FSMContext, bot: Bot
         await callback.message.answer(f"Установлен email: {email}")
         
         # Переходим к подтверждению создания поставщика
-        await show_supplier_confirmation(callback.message, state, bot)
+        await show_supplier_confirmation(callback.message, state, bot, is_edit=False)
     else:
         # Если в профиле нет email
         await callback.message.answer(
             "В вашем профиле не найден email. Пожалуйста, введите email вручную или пропустите этот шаг."
         )
 
-@router.callback_query(SupplierCreationStates.waiting_email, F.data == "skip_email")
+@router.callback_query(F.data == "skip_email")
 async def skip_email(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Пропуск ввода email"""
     await callback.answer()
-    
-    # Сохраняем None для email
-    await state.update_data(contact_email=None)
-    
     # Удаляем клавиатуру у текущего сообщения
     await remove_keyboard_from_context(bot, callback)
-    
-    # Сообщаем о пропуске
-    await callback.message.answer("Ввод email пропущен.")
-    
     # Переходим к подтверждению создания поставщика
-    await show_supplier_confirmation(callback.message, state, bot)
+    await show_supplier_confirmation(callback.message, state, bot, is_edit=True)
 
 # Обновляем функцию подтверждения
-async def show_supplier_confirmation(message: Message, state: FSMContext, bot: Bot):
+async def show_supplier_confirmation(message: Message, state: FSMContext, bot: Bot, is_edit: bool = False):
     """Показывает информацию для подтверждения создания поставщика"""
     # Получаем данные из состояния
     state_data = await state.get_data()
@@ -743,9 +843,127 @@ async def show_supplier_confirmation(message: Message, state: FSMContext, bot: B
     await state.set_state(SupplierCreationStates.confirm_supplier_creation)
     
     # Отправляем сообщение с подтверждением
-    await message.answer(
-        confirmation_text,
-        reply_markup=confirm_config.get("markup")
+    if is_edit:
+        await message.edit_text(
+            confirmation_text,
+            reply_markup=confirm_config.get("markup")
+        )
+    else:
+        await message.answer(
+            confirmation_text,
+            reply_markup=confirm_config.get("markup")
+        )
+
+@router.callback_query(SupplierCreationStates.confirm_supplier_creation, F.data == "edit_attributes")
+async def edit_supplier_attributes(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Обработчик кнопки редактирования атрибутов поставщика"""
+    await callback.answer()
+    await remove_keyboard_from_context(bot, callback)
+    # Получаем конфигурацию для выбора атрибута
+    edit_config = get_state_config(SupplierCreationStates.select_attribute_to_edit)
+    attributes = edit_config.get("attributes", [])
+    
+    # Формируем нумерованный список атрибутов
+    attributes_text = edit_config.get("text", "Выберите, что вы хотите отредактировать (введите номер):") + "\n\n"
+    for idx, attr in enumerate(attributes, 1):
+        attributes_text += f"{idx}. {attr['display']}\n"
+    
+    # Устанавливаем состояние выбора атрибута
+    await state.set_state(SupplierCreationStates.select_attribute_to_edit)
+    
+    # Сохраняем список атрибутов в состоянии
+    await state.update_data(edit_attributes=attributes)
+    
+    # Отправляем сообщение с выбором атрибутов
+    await callback.message.answer(
+        attributes_text,
+        reply_markup=edit_config.get("markup")
+    )
+
+@router.message(SupplierCreationStates.select_attribute_to_edit)
+async def process_attribute_selection(message: Message, state: FSMContext, bot: Bot):
+    """Обработка выбора атрибута для редактирования"""
+    try:
+        # Пытаемся получить номер атрибута
+        attr_number = int(message.text.strip())
+        await remove_keyboard_from_context(bot, message)
+        
+        # Получаем данные состояния
+        state_data = await state.get_data()
+        attributes = state_data.get("edit_attributes", [])
+        
+        # Проверяем корректность номера
+        if attr_number < 1 or attr_number > len(attributes):
+            await message.answer("Пожалуйста, выберите корректный номер атрибута из списка.")
+            return
+        
+        # Получаем выбранный атрибут
+        selected_attr = attributes[attr_number - 1]
+        
+        # Сохраняем выбранный атрибут для возврата после редактирования
+        await state.update_data(editing_attribute=selected_attr["name"])
+        
+        # Получаем состояние для редактирования атрибута
+        edit_state = selected_attr["state"]
+        
+        # Получаем конфигурацию для этого состояния
+        state_config = get_state_config(edit_state)
+        
+        # Подготавливаем текст и клавиатуру для редактирования выбранного атрибута
+        if edit_state == SupplierCreationStates.waiting_main_category:
+            # Для выбора категории нужно использовать специальную функцию
+            text = await state_config["text_func"](state)
+        elif edit_state == SupplierCreationStates.waiting_subcategory:
+            # Для выбора подкатегории также нужна специальная функция
+            main_category = state_data.get("main_category", "")
+            text, _ = await state_config["text_func"](main_category, state)
+        else:
+            # Для остальных атрибутов используем стандартный текст
+            text = f"Редактирование: {selected_attr['display']}\n\n" + state_config.get("text", "Введите новое значение:")
+        
+        # Задаем состояние редактирования
+        await state.set_state(edit_state)
+        
+        # Отправляем сообщение для редактирования
+        await message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Вернуться к списку атрибутов", callback_data="back_to_attributes")]
+                ]
+            )
+        )
+        
+    except ValueError:
+        await message.answer("Пожалуйста, введите номер атрибута из списка.")
+
+@router.callback_query(F.data == "back_to_attributes")
+async def back_to_attribute_list(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Обработчик кнопки возврата к списку атрибутов"""
+    await callback.answer()
+    
+    # Устанавливаем состояние выбора атрибута
+    await state.set_state(SupplierCreationStates.select_attribute_to_edit)
+    
+    # Получаем конфигурацию для выбора атрибута
+    edit_config = get_state_config(SupplierCreationStates.select_attribute_to_edit)
+    
+    # Получаем данные состояния
+    state_data = await state.get_data()
+    attributes = state_data.get("edit_attributes", [])
+    
+    # Формируем нумерованный список атрибутов
+    attributes_text = edit_config.get("text", "Выберите, что вы хотите отредактировать (введите номер):") + "\n\n"
+    for idx, attr in enumerate(attributes, 1):
+        attributes_text += f"{idx}. {attr['display']}\n"
+    
+    # Отправляем сообщение с выбором атрибутов
+    await edit_message_text_and_keyboard(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        text=attributes_text,
+        reply_markup=edit_config.get("markup")
     )
 
 # Обновляем функцию сохранения поставщика
@@ -807,18 +1025,38 @@ async def confirm_supplier_creation(callback: CallbackQuery, state: FSMContext, 
                 app_logger.error("Не удалось получить ID поставщика после создания")
                 raise Exception("Ошибка при сохранении поставщика")
             
+            # Создаем набор данных для отправки в чат администраторов
+            supplier_data = {
+                "company_name": state_data.get("company_name", ""),
+                "product_name": state_data.get("product_name", ""),
+                "category_name": state_data.get("main_category", ""),
+                "subcategory_name": state_data.get("subcategory_name", ""),
+                "description": state_data.get("description", "Не указано"),
+                "photos": state_data.get("photos", [])
+            }
+            
+            # Отправляем уведомление в чат администраторов
+            try:
+                # Отправляем карточку поставщика с кнопкой "Забрать себе"
+                result = await admin_chat_service.send_supplier_to_admin_chat(
+                    bot=bot,
+                    supplier_id=supplier_id,
+                    supplier_data=supplier_data
+                )
+                
+                if result:
+                    app_logger.info(f"Уведомление о новом поставщике отправлено в чат администраторов")
+                else:
+                    app_logger.warning("Не удалось отправить уведомление в чат администраторов")
+                
+            except Exception as e:
+                app_logger.error(f"Ошибка при отправке уведомления в чат администраторов: {str(e)}")
+            
             # Удаляем клавиатуру у текущего сообщения
             await remove_keyboard_from_context(bot, callback)
             
             # Формируем сообщение об успешном создании
-            success_message = f"Поставщик успешно создан!\n"
-            
-            # Добавляем информацию о медиафайлах
-            photos = state_data.get('photos', [])
-            success_message += f"Загружено фотографий: {len(photos)}\n"
-            success_message += "Видео: загружено\n" if state_data.get('video') else "Видео: не загружено\n"
-            
-            # Показываем успешное создание
+            success_message = f"Поставщик успешно создан! Данные будут проверены администратором.\n"
             await callback.message.answer(success_message)
             
             # Возвращаемся в меню поставщиков

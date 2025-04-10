@@ -43,11 +43,7 @@ action_config = {
 
     "my_suppliers": {
         "text": "Ваши созданные поставщики:",
-        "markup": InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:suppliers_list")]
-            ]
-        )
+        "markup": get_back_keyboard("suppliers", is_state=False, button_text="Назад")
     }
 }
 

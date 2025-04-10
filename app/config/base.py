@@ -15,6 +15,7 @@ class BaseConfig(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     ADMIN_IDS: list = []
+    ADMIN_GROUP_CHAT_ID: int = None  # ID группового чата администраторов
     
     class Config:
         env_file_encoding = "utf-8"

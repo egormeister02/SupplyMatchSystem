@@ -154,11 +154,200 @@ class DBService:
             logger.error(f"Error details: {str(e)}")
             raise
     
-    async def check_user_exists(self, user_id: int) -> bool:
-        """Check if user exists in database by Telegram ID"""
+    @staticmethod
+    async def fetch_data(query: str, params: dict = None):
+        """
+        Статический метод для выполнения запросов только на чтение.
+        Не требует создания сессии и не держит соединение открытым.
+        
+        Args:
+            query (str): SQL запрос
+            params (dict, optional): Параметры запроса
+            
+        Returns:
+            list: Список словарей с результатами запроса или None если ничего не найдено
+        """
+        try:
+            async with engine.connect() as conn:
+                if params:
+                    result = await conn.execute(text(query), params)
+                else:
+                    result = await conn.execute(text(query))
+                    
+                return [dict(row) for row in result.mappings()]
+        except Exception as e:
+            logger.error(f"Error executing read query: {query[:100]}...")
+            logger.error(f"Error details: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def fetch_one(query: str, params: dict = None):
+        """
+        Статический метод для выполнения запросов только на чтение и получения одной записи.
+        
+        Args:
+            query (str): SQL запрос
+            params (dict, optional): Параметры запроса
+            
+        Returns:
+            dict: Словарь с результатом запроса или None если ничего не найдено
+        """
+        try:
+            async with engine.connect() as conn:
+                if params:
+                    result = await conn.execute(text(query), params)
+                else:
+                    result = await conn.execute(text(query))
+                    
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error executing read query: {query[:100]}...")
+            logger.error(f"Error details: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def check_user_exists_static(user_id: int) -> bool:
+        """
+        Статический метод для проверки существования пользователя по ID.
+        Не требует создания сессии.
+        
+        Args:
+            user_id (int): ID пользователя
+            
+        Returns:
+            bool: True если пользователь существует, иначе False
+        """
         query = "SELECT 1 FROM users WHERE tg_id = :user_id LIMIT 1"
-        result = await self.execute_query(query, {"user_id": user_id})
-        return result.scalar() is not None
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text(query), {"user_id": user_id})
+                return result.scalar() is not None
+        except Exception as e:
+            logger.error(f"Error checking if user exists: {str(e)}")
+            return False
+    
+    @staticmethod
+    async def get_main_categories_static():
+        """
+        Статический метод для получения списка основных категорий.
+        Не требует создания сессии.
+        
+        Returns:
+            list: Список словарей с категориями
+        """
+        query = """
+            SELECT name
+            FROM main_categories
+            ORDER BY name
+        """
+        return await DBService.fetch_data(query)
+    
+    @staticmethod
+    async def get_subcategories_static(main_category_name: str):
+        """
+        Статический метод для получения списка подкатегорий.
+        Не требует создания сессии.
+        
+        Args:
+            main_category_name (str): Название основной категории
+            
+        Returns:
+            list: Список словарей с подкатегориями
+        """
+        query = """
+            SELECT id, name
+            FROM categories
+            WHERE main_category_name = :main_category_name
+            ORDER BY name
+        """
+        return await DBService.fetch_data(query, {"main_category_name": main_category_name})
+    
+    @staticmethod
+    async def get_supplier_by_id_static(supplier_id: int) -> dict:
+        """
+        Статический метод для получения информации о поставщике по ID.
+        Не требует создания сессии.
+        
+        Args:
+            supplier_id (int): ID поставщика
+            
+        Returns:
+            dict: Информация о поставщике или None если поставщик не найден
+        """
+        try:
+            # Получаем основную информацию о поставщике
+            query = """
+                SELECT 
+                    s.id, s.company_name, s.product_name, s.category_id, 
+                    s.description, s.country, s.region, s.city, s.address,
+                    s.contact_username, s.contact_phone, s.contact_email,
+                    s.created_at, s.status, s.created_by_id, s.tarrif,
+                    c.name as category_name, mc.name as main_category_name
+                FROM suppliers s
+                LEFT JOIN categories c ON s.category_id = c.id
+                LEFT JOIN main_categories mc ON c.main_category_name = mc.name
+                WHERE s.id = :supplier_id
+            """
+            supplier_dict = await DBService.fetch_one(query, {"supplier_id": supplier_id})
+            
+            if not supplier_dict:
+                return None
+                
+            # Получаем файлы поставщика
+            files_query = """
+                SELECT id, type, file_path, name, uploaded_at
+                FROM files
+                WHERE supplier_id = :supplier_id
+                ORDER BY type, uploaded_at
+            """
+            files = await DBService.fetch_data(files_query, {"supplier_id": supplier_id})
+            
+            # Формируем структуру с фотографиями и видео
+            photos = []
+            video = None
+            
+            for file in files:
+                if file["type"] == "photo":
+                    photos.append(file)
+                elif file["type"] == "video":
+                    video = file
+            
+            supplier_dict["photos"] = photos
+            supplier_dict["video"] = video
+            
+            return supplier_dict
+            
+        except Exception as e:
+            logging.error(f"Error getting supplier by ID: {str(e)}")
+            return None
+    
+    @staticmethod
+    async def get_suppliers_by_subcategory_static(subcategory_id: int):
+        """
+        Статический метод для получения списка поставщиков по ID подкатегории.
+        
+        Args:
+            subcategory_id (int): ID подкатегории
+            
+        Returns:
+            list: Список поставщиков
+        """
+        query = """
+            SELECT id FROM suppliers 
+            WHERE category_id = :category_id AND status = 'pending'
+            ORDER BY created_at DESC
+        """
+        return await DBService.fetch_data(query, {"category_id": subcategory_id})
+    
+    @staticmethod
+    async def update_supplier_status(supplier_id: int, status: str):
+        query = """
+            UPDATE suppliers
+            SET status = :status
+            WHERE id = :supplier_id
+        """
+        await DBService.execute(query, {"supplier_id": supplier_id, "status": status})
     
     async def save_user(
         self, 
@@ -392,68 +581,6 @@ class DBService:
             logging.error(f"Параметры: file_path={file_path}, file_type={file_type}, name={name}, supplier_id={supplier_id}")
             raise
 
-    async def get_supplier_by_id(self, supplier_id: int) -> dict:
-        """
-        Получает информацию о поставщике по ID с присоединением категории и файлов.
-        
-        Args:
-            supplier_id (int): ID поставщика
-            
-        Returns:
-            dict: Информация о поставщике или None, если поставщик не найден
-        """
-        try:
-            # Получаем основную информацию о поставщике
-            query = """
-                SELECT 
-                    s.id, s.company_name, s.product_name, s.category_id, 
-                    s.description, s.country, s.region, s.city, s.address,
-                    s.contact_username, s.contact_phone, s.contact_email,
-                    s.created_at, s.status, s.created_by_id, s.tarrif,
-                    c.name as category_name, mc.name as main_category_name
-                FROM suppliers s
-                LEFT JOIN categories c ON s.category_id = c.id
-                LEFT JOIN main_categories mc ON c.main_category_name = mc.name
-                WHERE s.id = :supplier_id
-            """
-            result = await self.execute_query(query, {"supplier_id": supplier_id})
-            supplier_row = result.mappings().fetchone()
-            
-            if not supplier_row:
-                return None
-                
-            supplier_dict = dict(supplier_row)
-            
-            # Получаем файлы поставщика
-            files_query = """
-                SELECT id, type, file_path, name, uploaded_at
-                FROM files
-                WHERE supplier_id = :supplier_id
-                ORDER BY type, uploaded_at
-            """
-            files_result = await self.execute_query(files_query, {"supplier_id": supplier_id})
-            files = files_result.mappings().fetchall()
-            
-            # Формируем структуру с фотографиями и видео
-            photos = []
-            video = None
-            
-            for file in files:
-                file_dict = dict(file)
-                if file_dict["type"] == "photo":
-                    photos.append(file_dict)
-                elif file_dict["type"] == "video":
-                    video = file_dict
-            
-            supplier_dict["photos"] = photos
-            supplier_dict["video"] = video
-            
-            return supplier_dict
-            
-        except Exception as e:
-            logging.error(f"Ошибка при получении информации о поставщике: {str(e)}")
-            raise
-
     async def get_suppliers_by_ids(self, supplier_ids: list) -> list:
         """
         Получает информацию о нескольких поставщиках по списку ID.
@@ -484,21 +611,6 @@ class DBService:
                 else:
                     result = await conn.execute(text(query))
                 return [dict(row) for row in result]
-        except Exception as e:
-            logger.error(f"Error executing query: {query[:100]}...")
-            logger.error(f"Error details: {str(e)}")
-            raise
-
-    async def fetch_one(self, query: str, params: dict = None) -> dict:
-        """Execute a query and return first result"""
-        try:
-            async with engine.begin() as conn:
-                if params:
-                    result = await conn.execute(text(query), params)
-                else:
-                    result = await conn.execute(text(query))
-                row = result.first()
-                return dict(row) if row else None
         except Exception as e:
             logger.error(f"Error executing query: {query[:100]}...")
             logger.error(f"Error details: {str(e)}")

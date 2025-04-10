@@ -38,11 +38,13 @@ CREATE TABLE suppliers (
     contact_phone VARCHAR(255),
     contact_email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
-    status VARCHAR(255) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+    status VARCHAR(255) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+    verified_by_id INTEGER,
     created_by_id INTEGER,
     tarrif VARCHAR(255),
 
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
+    FOREIGN KEY (verified_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
@@ -53,7 +55,7 @@ CREATE TABLE requests (
     description TEXT,
     created_by_id INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+    status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );

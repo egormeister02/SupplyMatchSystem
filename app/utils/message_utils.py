@@ -5,9 +5,12 @@ Utility functions for message operations
 from typing import Union, Optional
 from aiogram import Bot
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, InlineKeyboardMarkup
+from aiogram.types.input_file import FSInputFile
+from aiogram.types import InputMediaPhoto
 from aiogram.exceptions import TelegramAPIError
 import logging
 import os
+from app.services.local_storage import local_storage_service
 
 async def remove_previous_keyboard(
     bot: Bot, 
@@ -101,14 +104,15 @@ async def edit_message_text_and_keyboard(
         logging.error(f"Error editing message: {e}")
         # Message can't be edited or hasn't changed
         return False 
+    
 
 async def send_supplier_card(
     bot: Bot,
     chat_id: int, 
     supplier: dict, 
-    inline_keyboard: Optional[InlineKeyboardMarkup] = None, 
+    keyboard: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None, 
     message_id: Optional[int] = None
-) -> None:
+) -> dict:
     """
     Отправляет или редактирует карточку поставщика в указанный чат.
     
@@ -116,11 +120,14 @@ async def send_supplier_card(
         bot (Bot): Объект бота для отправки сообщений
         chat_id (int): ID чата для отправки
         supplier (dict): Словарь с данными о поставщике
-        inline_keyboard (Optional[InlineKeyboardMarkup]): Клавиатура для сообщения
+        keyboard (Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]]): Клавиатура для сообщения
         message_id (Optional[int]): ID сообщения для редактирования (если None, то отправляется новое)
+        
+    Returns:
+        dict: Словарь с message_ids всех отправленных сообщений:
+            - keyboard_message_id: ID сообщения с клавиатурой
+            - media_message_ids: список ID сообщений медиагруппы или ID сообщения с фото
     """
-    from aiogram.types import InputMediaPhoto
-    
     # Формируем текст сообщения
     # Формируем заголовок
     title = f"Название: {supplier.get('company_name')}"
@@ -182,48 +189,139 @@ async def send_supplier_card(
     text += f"Контакты:\n{contact_info}\n\n"
     text += f"{media_text}"
     
-    # Получаем путь к главному фото
-    photo_path = None
-    if photos and len(photos) > 0:
-        photo_path = photos[0].get('file_path')
+    logging.info(f"Фотографии поставщика: {photos}")
     
-    # Если есть message_id, то редактируем сообщение
-    if message_id:
+    # Получаем пути ко всем фотографиям
+    photo_paths = []
+    for photo in photos:
+        relative_path = photo.get('file_path')
+        if relative_path:
+            try:
+                full_path = await local_storage_service.get_file_path(relative_path)
+                if full_path and os.path.exists(full_path):
+                    photo_paths.append(full_path)
+            except Exception as e:
+                logging.error(f"Ошибка при получении пути к фото: {e}")
+    
+    # Если есть message_id и нет фото, то редактируем текстовое сообщение
+    if message_id and not photo_paths:
         try:
-            if photo_path and os.path.exists(photo_path):
-                # Редактируем фото и текст
-                media = InputMediaPhoto(media=photo_path, caption=text)
-                await bot.edit_message_media(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    media=media,
-                    reply_markup=inline_keyboard
-                )
-            else:
-                # Редактируем только текст
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=text,
-                    reply_markup=inline_keyboard
-                )
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {"keyboard_message_id": message_id, "media_message_ids": []}
         except Exception as e:
             logging.error(f"Ошибка при редактировании сообщения: {e}")
             # Если не удалось отредактировать, отправляем новое
             message_id = None
     
-    # Если нет message_id или не удалось отредактировать, отправляем новое сообщение
-    if not message_id:
-        if photo_path and os.path.exists(photo_path):
-            await bot.send_photo(
+    # Если фотографий больше одной, отправляем их группой
+    if len(photo_paths) > 1:
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Создаем список медиа-объектов
+            media = []
+            for i, photo_path in enumerate(photo_paths):
+                # Для первой фотографии добавляем подпись
+                caption = text if i == 0 else None
+                media.append(InputMediaPhoto(
+                    media=FSInputFile(photo_path),
+                    caption=caption
+                ))
+            
+            # Отправляем группу фотографий
+            media_messages = await bot.send_media_group(
                 chat_id=chat_id,
-                photo=photo_path,
-                caption=text,
-                reply_markup=inline_keyboard
+                media=media
             )
-        else:
-            await bot.send_message(
+            
+            # Сохраняем ID всех сообщений медиагруппы
+            media_message_ids = [msg.message_id for msg in media_messages]
+            
+            # Для медиагруппы отправляем клавиатуру отдельным сообщением
+            if keyboard:
+                keyboard_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text="Используйте кнопки для навигации:",
+                    reply_markup=keyboard
+                )
+                return {
+                    "keyboard_message_id": keyboard_message.message_id,
+                    "media_message_ids": media_message_ids
+                }
+            else:
+                return {
+                    "keyboard_message_id": None,
+                    "media_message_ids": media_message_ids
+                }
+                
+        except Exception as e:
+            logging.error(f"Ошибка при отправке фотографий: {e}")
+            # Если не удалось отправить фото, отправляем просто текст
+            msg = await bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                reply_markup=inline_keyboard
-            ) 
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
+    # Если есть только одна фотография, отправляем её с текстом и клавиатурой
+    elif len(photo_paths) == 1:
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно фото с текстом и клавиатурой
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=FSInputFile(photo_paths[0]),
+                caption=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": message.message_id,
+                "media_message_ids": [message.message_id]
+            }
+        except Exception as e:
+            logging.error(f"Ошибка при отправке фотографии: {e}")
+            # Если не удалось отправить фото, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
+    else:
+        # Если нет фото, отправляем текстовое сообщение с клавиатурой
+        message = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=keyboard  # Прикрепляем клавиатуру сразу к сообщению
+        )
+        return {
+            "keyboard_message_id": message.message_id,
+            "media_message_ids": []
+        }
+    
+    return {
+        "keyboard_message_id": None,
+        "media_message_ids": []
+    } 

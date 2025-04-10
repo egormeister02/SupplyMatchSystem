@@ -40,7 +40,7 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
         state_name = callback_parts[2]
         
         # Импортируем группы состояний
-        from app.states.states import RegistrationStates, SupplierCreationStates
+        from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates
         from aiogram.fsm.state import State
         
         # Определяем группу состояний на основе group_name
@@ -49,6 +49,8 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
             state_group = RegistrationStates
         elif group_name == "SupplierCreationStates":
             state_group = SupplierCreationStates
+        elif group_name == "SupplierSearchStates":
+            state_group = SupplierSearchStates
         else:
             await callback.message.answer(f"Неизвестная группа состояний: {group_name}")
             return
@@ -67,9 +69,9 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
                 # Проверяем наличие функции формирования текста или статического текста
                 if "text_func" in state_config:
                     # Для состояний с категориями и подкатегориями
-                    if target_state == SupplierCreationStates.waiting_main_category:
+                    if target_state == SupplierCreationStates.waiting_main_category or target_state == SupplierSearchStates.waiting_category:
                         message_text = await state_config["text_func"](state)
-                    elif target_state == SupplierCreationStates.waiting_subcategory:
+                    elif target_state == SupplierCreationStates.waiting_subcategory or target_state == SupplierSearchStates.waiting_subcategory:
                         # Получаем выбранную категорию из состояния
                         state_data = await state.get_data()
                         selected_category = state_data.get("main_category", "")

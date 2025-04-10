@@ -10,7 +10,7 @@ from app.keyboards.inline import (
     get_back_button,
 )
 
-from app.states.states import RegistrationStates, SupplierCreationStates
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates
 from app.services import get_db_session, DBService
 
 # Вспомогательные функции для формирования текстов
@@ -151,22 +151,53 @@ supplier_creation_config = {
         "back_state": SupplierCreationStates.waiting_product_name,
     },
 
-    # Ввод местоположения
-    SupplierCreationStates.waiting_location: {
-        "text": "Введите информацию о местоположении.\n"
-                "Вы можете ввести:\n"
-                "1. Только страну\n"
-                "2. Страну и регион\n"
-                "3. Страну, регион и город\n"
-                "4. Полный адрес (страна, регион, город, адрес)\n\n"
-                "Адресс без запятых",
+    # Ввод страны
+    SupplierCreationStates.waiting_country: {
+        "text": "Введите страну местонахождения:",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [get_back_button("waiting_description", is_state=True, button_text="Назад к описанию", state_group="SupplierCreationStates")],
                 [get_back_button("waiting_additional_photos", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")]
             ]
         ),
+
         "back_state": SupplierCreationStates.waiting_description,
+    },
+
+    # Ввод региона
+    SupplierCreationStates.waiting_region: {
+        "text": "Введите регион (область, край, республику):\n\nВы можете пропустить этот шаг, нажав на соответствующую кнопку.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_additional_photos", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_country", is_state=True, button_text="Назад к вводу страны", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_country,
+    },
+
+    # Ввод города
+    SupplierCreationStates.waiting_city: {
+        "text": "Введите город или населенный пункт:\n\nВы можете пропустить этот шаг, нажав на соответствующую кнопку.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_additional_photos", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_region", is_state=True, button_text="Назад к вводу региона", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_region,
+    },
+
+    # Ввод адреса
+    SupplierCreationStates.waiting_address: {
+        "text": "Введите точный адрес (улица, дом и т.д.):\n\nВы можете пропустить этот шаг, нажав на соответствующую кнопку.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_additional_photos", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_city", is_state=True, button_text="Назад к вводу города", state_group="SupplierCreationStates")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.waiting_city,
     },
 
     # Загрузка дополнительных фото
@@ -177,10 +208,10 @@ supplier_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [get_back_button("waiting_video", is_state=True, button_text="Продолжить", state_group="SupplierCreationStates")],
-                [get_back_button("waiting_location", is_state=True, button_text="Назад к местоположению", state_group="SupplierCreationStates")]
+                [get_back_button("waiting_country", is_state=True, button_text="Назад к стране", state_group="SupplierCreationStates")]
             ]
         ),
-        "back_state": SupplierCreationStates.waiting_location,
+        "back_state": SupplierCreationStates.waiting_address,
     },
 
     # Загрузка видео
@@ -203,8 +234,8 @@ supplier_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Использовать мой", callback_data="use_my_username")],
-                [get_back_button("waiting_video", is_state=True, button_text="Назад к видео", state_group="SupplierCreationStates")],
-                [get_back_button("waiting_phone", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")]
+                [get_back_button("waiting_phone", is_state=True, button_text="Пропустить", state_group="SupplierCreationStates")],
+                [get_back_button("waiting_video", is_state=True, button_text="Назад к видео", state_group="SupplierCreationStates")]
             ]
         ),
         "back_state": SupplierCreationStates.waiting_video,
@@ -252,11 +283,67 @@ supplier_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Подтвердить", callback_data="confirm")],
-                [get_back_button("waiting_company_name", is_state=True, button_text="Изменить данные", state_group="SupplierCreationStates")],
+                [InlineKeyboardButton(text="Редактировать данные", callback_data="edit_attributes")],
                 [get_back_button("waiting_email", is_state=True, button_text="Назад к email", state_group="SupplierCreationStates")]
             ]
         ),
         "back_state": SupplierCreationStates.waiting_email,
+    },
+    
+    # Выбор атрибута для редактирования
+    SupplierCreationStates.select_attribute_to_edit: {
+        "text": "Выберите, что вы хотите отредактировать (введите номер):",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Назад к подтверждению", callback_data="skip_email")]
+            ]
+        ),
+        "back_state": SupplierCreationStates.confirm_supplier_creation,
+        "attributes": [
+            {"name": "company_name", "display": "Название компании", "state": SupplierCreationStates.waiting_company_name},
+            {"name": "main_category", "display": "Категория", "state": SupplierCreationStates.waiting_main_category},
+            {"name": "product_name", "display": "Название продукта/услуги", "state": SupplierCreationStates.waiting_product_name},
+            {"name": "description", "display": "Описание", "state": SupplierCreationStates.waiting_description},
+            {"name": "country", "display": "Страна", "state": SupplierCreationStates.waiting_country},
+            {"name": "region", "display": "Регион", "state": SupplierCreationStates.waiting_region},
+            {"name": "city", "display": "Город", "state": SupplierCreationStates.waiting_city},
+            {"name": "address", "display": "Адрес", "state": SupplierCreationStates.waiting_address},
+            {"name": "contact_username", "display": "Telegram контакт", "state": SupplierCreationStates.waiting_tg_username},
+            {"name": "contact_phone", "display": "Телефон", "state": SupplierCreationStates.waiting_phone},
+            {"name": "contact_email", "display": "Email", "state": SupplierCreationStates.waiting_email}
+        ]
+    }
+}
+
+# Конфигурация для состояний поиска поставщиков
+supplier_search_config = {
+    # Состояние ожидания выбора категории
+    SupplierSearchStates.waiting_category: {
+        "text_func": get_categories_text,
+        "markup": get_back_keyboard("suppliers", is_state=False, button_text="Назад"),
+        "error_text": "Пожалуйста, введите корректный номер категории из списка.",
+    },
+    
+    # Состояние ожидания выбора подкатегории
+    SupplierSearchStates.waiting_subcategory: {
+        "text_func": get_subcategories_text,
+        "markup": get_back_keyboard("waiting_category", is_state=True, button_text="Назад к категориям", state_group="SupplierSearchStates"),
+        "error_text": "Пожалуйста, введите корректный номер подкатегории из списка.",
+    },
+    
+    # Состояние просмотра поставщиков
+    SupplierSearchStates.viewing_suppliers: {
+        "text": "Выберите действие:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="◀️", callback_data="prev_supplier"),
+                    InlineKeyboardButton(text="1/1", callback_data="current_supplier"),
+                    InlineKeyboardButton(text="▶️", callback_data="next_supplier")
+                ],
+                [get_back_button("waiting_subcategory", is_state=True, button_text="Назад к подкатегориям", state_group="SupplierSearchStates")]
+            ]
+        ),
     },
 }
 
@@ -266,7 +353,7 @@ def get_state_config(state):
     Получает конфигурацию для указанного состояния.
     
     Args:
-        state: Объект состояния из RegistrationStates или SupplierCreationStates
+        state: Объект состояния из RegistrationStates, SupplierCreationStates или SupplierSearchStates
         
     Returns:
         dict: Конфигурация для указанного состояния или None
@@ -277,6 +364,8 @@ def get_state_config(state):
         config = registration_config[state]
     elif state in supplier_creation_config:
         config = supplier_creation_config[state]
+    elif state in supplier_search_config:
+        config = supplier_search_config[state]
         
     return config
 

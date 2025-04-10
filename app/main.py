@@ -16,7 +16,8 @@ from app.handlers import (
     user,
     base,
     actions,
-    suppliers  # Добавляем новый обработчик
+    suppliers,  # Добавляем новый обработчик
+    admin  # Добавляем обработчик админского чата
 )
 from app.middlewares import setup_middlewares
 from app.services.database import init_db
@@ -48,6 +49,7 @@ def register_handlers():
     actions.register_handlers(dp)
     user.register_handlers(dp)
     suppliers.register_handlers(dp)  # Регистрируем новый обработчик
+    admin.register_handlers(dp)  # Регистрируем обработчики админского чата
 
 register_handlers()  # Вызываем функцию регистрации
 setup_middlewares(dp)

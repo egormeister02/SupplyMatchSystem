@@ -15,12 +15,16 @@ class SupplierCreationStates(StatesGroup):
     waiting_subcategory = State()
     waiting_product_name = State()
     waiting_description = State()
-    waiting_location = State()
+    waiting_country = State()  # Ввод страны
+    waiting_region = State()   # Ввод региона
+    waiting_city = State()     # Ввод города
+    waiting_address = State()  # Ввод адреса
     waiting_additional_photos = State()
     waiting_video = State()
     waiting_tg_username = State()
     waiting_phone = State()
     waiting_email = State()
+    select_attribute_to_edit = State()  # Выбор атрибута для редактирования
     confirm_supplier_creation = State()
 
 class SupplierSearchStates(StatesGroup):

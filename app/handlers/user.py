@@ -5,9 +5,10 @@ User registration and authorization handlers
 import logging
 import re
 from datetime import datetime
+from typing import Union
 
 from aiogram import Router, F, Bot, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
@@ -40,12 +41,16 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     username = message.from_user.username
     
     # Check if user exists in database
-    async with get_db_session() as session:
-        db_service = DBService(session)
-        user_exists = await db_service.check_user_exists(user_id)
+    user_exists = await DBService.check_user_exists_static(user_id)
         
     if user_exists:
         # User exists, show main menu
+            # Удаляем клавиатуру перед возвратом и сразу удаляем сообщение
+        kb_message = await message.answer("Возвращаемся к меню", reply_markup=ReplyKeyboardRemove())
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=kb_message.message_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении сообщения: {str(e)}")
         await message.answer(
             f"Добро пожаловать в меню, {message.from_user.first_name}! Выберите действие:",
             reply_markup=get_main_user_menu_keyboard()
@@ -316,117 +321,286 @@ async def show_registration_confirmation(message: Message, state: FSMContext, bo
 
 # Обновленный код для выбора категорий поставщиков
 @router.callback_query(F.data == "suppliers_list")
-async def handle_suppliers_list(callback: CallbackQuery, bot: Bot, state: FSMContext):
+async def handle_suppliers_list(callback: Union[CallbackQuery, Message], bot: Bot, state: FSMContext):
     """
     Обработчик для кнопки 'База поставщиков'.
     Показывает список категорий для выбора.
     """
-    await callback.answer()
+    # Проверяем тип входящего объекта и вызываем answer() только если это CallbackQuery
+    is_callback = isinstance(callback, CallbackQuery)
+    if is_callback:
+        await callback.answer()
     
-    # Получаем основные категории из базы
-    async with get_db_session() as session:
-        db_service = DBService(session)
-        main_categories = await db_service.get_main_categories()
-    
-    # Формируем сообщение со списком категорий
-    text = "Выберите категорию (введите номер):\n\n"
-    
-    for i, category in enumerate(main_categories, 1):
-        text += f"{i}. {category['name']}\n"
-    
-    # Добавляем кнопку "Назад"
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Назад", callback_data="back_to_action:suppliers")]
-    ])
-    
-    # Сохраняем категории в состояние
-    await state.update_data(main_categories=main_categories)
-    
-    # Отправляем сообщение и устанавливаем состояние
-    await callback.message.answer(text, reply_markup=markup)
-    await state.set_state(SupplierSearchStates.waiting_category)
+    try:
+        # Получаем основные категории из базы, используя статический метод
+        main_category_config = get_state_config(SupplierSearchStates.waiting_category)
+        
+        categories_text = await main_category_config["text_func"](state)
+        
+        # В зависимости от типа входящего объекта, выбираем метод отправки
+        if is_callback:
+            await callback.message.answer(
+                categories_text,
+                reply_markup=main_category_config.get("markup")
+            )
+        else:
+            await callback.answer(
+                categories_text,
+                reply_markup=main_category_config.get("markup")
+            )
+        
+        await state.set_state(SupplierSearchStates.waiting_category)
+        
+    except Exception as e:
+        logging.error(f"Ошибка при получении категорий: {str(e)}")
+        
+        # В зависимости от типа входящего объекта, выбираем метод отправки
+        if is_callback:
+            await callback.message.answer(
+                "Произошла ошибка при загрузке категорий. Пожалуйста, попробуйте позже.",
+                reply_markup=get_main_user_menu_keyboard()
+            )
+        else:
+            await callback.answer(
+                "Произошла ошибка при загрузке категорий. Пожалуйста, попробуйте позже.",
+                reply_markup=get_main_user_menu_keyboard()
+            )
 
 # Обработчик для всех текстовых сообщений в состоянии ожидания ввода категории
 @router.message(SupplierSearchStates.waiting_category)
 async def process_supplier_category(message: Message, state: FSMContext, bot: Bot):
-    """
-    Обработчик ввода номера категории поставщиков.
-    """
-    # Получаем текст сообщения
-    category_text = message.text.strip()
+    
+    try:
+        category_number = int(message.text.strip())
+        
+        await remove_keyboard_from_context(bot, message)
+        
+        state_data = await state.get_data()
+        main_categories = state_data.get("main_categories", [])
+        
+        if not main_categories or category_number < 1 or category_number > len(main_categories):
+
+            main_category_config = get_state_config(SupplierSearchStates.waiting_main_category)
+            categories_text = await main_category_config["text_func"](state)
+            
+            await message.answer(
+                f"{main_category_config['error_text']}\n\n{categories_text}",
+                reply_markup=main_category_config.get("markup")
+            )
+            return
+        
+        selected_category = main_categories[category_number - 1]["name"]
+        
+        await state.update_data(main_category=selected_category)
+        
+        subcategory_config = get_state_config(SupplierSearchStates.waiting_subcategory)
+        
+        subcategories_text, success = await subcategory_config["text_func"](selected_category, state)
+        
+        if not success:
+            await message.answer(
+                subcategories_text,
+                reply_markup=main_category_config.get("markup")
+            )
+            return
+        
+        await message.answer(
+            subcategories_text,
+            reply_markup=subcategory_config.get("markup")
+        )
+        
+        await state.set_state(SupplierSearchStates.waiting_subcategory)
+            
+    except ValueError:
+
+        main_category_config = get_state_config(SupplierSearchStates.waiting_main_category)
+        categories_text = await main_category_config["text_func"](state)
+        
+        await message.answer(
+            f"{main_category_config['error_text']}\n\n{categories_text}",
+            reply_markup=main_category_config.get("markup")
+        )
+
+# Добавляем обработчики для навигации между поставщиками
+@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "next_supplier")
+async def next_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Переход к следующему поставщику"""
+    await callback.answer()
     
     # Получаем данные из состояния
     state_data = await state.get_data()
-    main_categories = state_data.get("main_categories", [])
+    suppliers = state_data.get("suppliers", [])
+    current_index = state_data.get("current_index", 0)
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
     
-    # Проверяем ввод на число
-    try:
-        category_number = int(category_text)
-        
-        # Проверяем диапазон
-        if not main_categories or category_number < 1 or category_number > len(main_categories):
-            await message.answer(
-                f"Пожалуйста, введите корректный номер категории от 1 до {len(main_categories)}.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Назад", callback_data="suppliers_list")]
-                ])
+    # Вычисляем новый индекс (с циклическим переходом)
+    new_index = (current_index + 1) % len(suppliers)
+    
+    # Обновляем индекс в состоянии
+    await state.update_data(current_index=new_index)
+    
+    # Получаем данные о новом поставщике
+    current_supplier = suppliers[new_index]
+    total_suppliers = len(suppliers)
+    
+    # Получаем конфигурацию для состояния
+    config = get_state_config(SupplierSearchStates.viewing_suppliers)
+    keyboard = config["markup"]
+    
+    # Обновляем текст кнопки с текущим индексом
+    for row in keyboard.inline_keyboard:
+        for button in row:
+            if button.callback_data == "current_supplier":
+                button.text = f"{new_index+1}/{total_suppliers}"
+    
+    # Удаляем сообщение с предыдущей клавиатурой, если ID известен
+    if keyboard_message_id:
+        try:
+            await bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=keyboard_message_id
             )
-            return
-        
-        # Получаем выбранную категорию
-        selected_category = main_categories[category_number - 1]["name"]
-        
-        # Сохраняем выбранную категорию
-        await state.update_data(main_category=selected_category)
-        
-        # Получаем подкатегории из базы
-        async with get_db_session() as session:
-            db_service = DBService(session)
-            subcategories = await db_service.get_subcategories(selected_category)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении старой клавиатуры: {e}")
+    
+    # Удаляем все сообщения с медиа из предыдущей карточки
+    for media_id in media_message_ids:
+        try:
+            await bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=media_id
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при удалении медиа-сообщения {media_id}: {e}")
+    
+    # Отправляем карточку поставщика с клавиатурой
+    message_ids = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=current_supplier,
+        keyboard=keyboard
+    )
+    
+    # Обновляем ID сообщений в состоянии
+    await state.update_data(
+        keyboard_message_id=message_ids["keyboard_message_id"],
+        media_message_ids=message_ids["media_message_ids"]
+    )
+
+@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "prev_supplier")
+async def prev_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Переход к предыдущему поставщику"""
+    await callback.answer()
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    suppliers = state_data.get("suppliers", [])
+    current_index = state_data.get("current_index", 0)
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    
+    # Вычисляем новый индекс (с циклическим переходом)
+    new_index = (current_index - 1) % len(suppliers)
+    
+    # Обновляем индекс в состоянии
+    await state.update_data(current_index=new_index)
+    
+    # Получаем данные о новом поставщике
+    current_supplier = suppliers[new_index]
+    total_suppliers = len(suppliers)
+    
+    # Получаем конфигурацию для состояния
+    config = get_state_config(SupplierSearchStates.viewing_suppliers)
+    keyboard = config["markup"]
+    
+    # Обновляем текст кнопки с текущим индексом
+    for row in keyboard.inline_keyboard:
+        for button in row:
+            if button.callback_data == "current_supplier":
+                button.text = f"{new_index+1}/{total_suppliers}"
+    
+    # Удаляем сообщение с предыдущей клавиатурой, если ID известен
+    if keyboard_message_id:
+        try:
+            await bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=keyboard_message_id
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при удалении старой клавиатуры: {e}")
+    
+    # Удаляем все сообщения с медиа из предыдущей карточки
+    for media_id in media_message_ids:
+        try:
+            await bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=media_id
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при удалении медиа-сообщения {media_id}: {e}")
+    
+    # Отправляем карточку поставщика с клавиатурой
+    message_ids = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=current_supplier,
+        keyboard=keyboard
+    )
+    
+    # Обновляем ID сообщений в состоянии
+    await state.update_data(
+        keyboard_message_id=message_ids["keyboard_message_id"],
+        media_message_ids=message_ids["media_message_ids"]
+    )
+
+@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data.startswith("back_to_state:"))
+async def back_to_subcategories(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Обработчик для возврата к выбору подкатегории"""
+    await callback.answer()
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    main_category = state_data.get("main_category", "")
+    
+    # Возвращаемся к выбору подкатегории
+    try:
+        # Получаем подкатегории для выбранной основной категории
+        subcategories = await DBService.get_subcategories_static(main_category)
         
         # Если подкатегорий нет
         if not subcategories:
-            await message.answer(
-                f"В категории '{selected_category}' нет подкатегорий.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-                ])
-            )
+            # Возвращаемся к выбору категории
+            await handle_suppliers_list(callback, bot, state)
             return
         
         # Формируем сообщение со списком подкатегорий
-        text = f"Выбрана категория: {selected_category}\n\nВыберите подкатегорию (введите номер):\n\n"
+        text = f"Выбрана категория: {main_category}\n\nВыберите подкатегорию (введите номер):\n\n"
         
         for i, subcategory in enumerate(subcategories, 1):
             text += f"{i}. {subcategory['name']}\n"
         
-        # Добавляем кнопку "Назад"
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-        ])
-        
         # Сохраняем подкатегории в состояние
         await state.update_data(subcategories=subcategories)
         
+        # Получаем конфигурацию для состояния
+        config = get_state_config(SupplierSearchStates.waiting_subcategory)
+        
         # Отправляем сообщение и устанавливаем состояние
-        await message.answer(text, reply_markup=markup)
+        await callback.message.answer(text, reply_markup=config["markup"])
         await state.set_state(SupplierSearchStates.waiting_subcategory)
         
-    except ValueError:
-        # Если ввод не число, сообщаем об ошибке
-        await message.answer(
-            f"Пожалуйста, введите номер категории числом от 1 до {len(main_categories)}.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Назад", callback_data="suppliers_list")]
-            ])
+    except Exception as e:
+        logging.error(f"Ошибка при возврате к подкатегориям: {str(e)}")
+        await callback.message.answer(
+            "Произошла ошибка при загрузке подкатегорий. Пожалуйста, попробуйте позже.",
+            reply_markup=get_main_user_menu_keyboard()
         )
 
-# Обработчик для всех текстовых сообщений в состоянии ожидания ввода подкатегории
+# Обновляем обработчик для вывода списка поставщиков
 @router.message(SupplierSearchStates.waiting_subcategory)
 async def process_supplier_subcategory(message: Message, state: FSMContext, bot: Bot):
-    """
-    Обработчик ввода номера подкатегории поставщиков.
-    """
+    """Обработчик ввода номера подкатегории поставщиков."""
     # Получаем текст сообщения
     subcategory_text = message.text.strip()
     
@@ -441,11 +615,10 @@ async def process_supplier_subcategory(message: Message, state: FSMContext, bot:
         
         # Проверяем диапазон
         if not subcategories or subcategory_number < 1 or subcategory_number > len(subcategories):
+            config = get_state_config(SupplierSearchStates.waiting_subcategory)
             await message.answer(
-                f"Пожалуйста, введите корректный номер подкатегории от 1 до {len(subcategories)}.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-                ])
+                config["error_text"],
+                reply_markup=config["markup"]
             )
             return
         
@@ -454,185 +627,109 @@ async def process_supplier_subcategory(message: Message, state: FSMContext, bot:
         subcategory_id = selected_subcategory["id"]
         subcategory_name = selected_subcategory["name"]
         
-        # Получаем список поставщиков для выбранной подкатегории
-        async with get_db_session() as session:
-            db_service = DBService(session)
-            query = """
-                SELECT * FROM suppliers 
-                WHERE category_id = :category_id AND status = 'pending'
-                ORDER BY created_at DESC
-            """
-            result = await db_service.execute_query(query, {"category_id": subcategory_id})
-            suppliers = [dict(row) for row in result.mappings().fetchall()]
-        
-        # Если поставщиков нет
-        if not suppliers:
+        try:
+            # Получаем список поставщиков для выбранной подкатегории, используя статический метод
+            supplier_ids = await DBService.get_suppliers_by_subcategory_static(subcategory_id)
+            
+            # Если поставщиков нет
+            if not supplier_ids:
+                config = get_state_config(SupplierSearchStates.waiting_subcategory)
+                await message.answer(
+                    f"В подкатегории '{subcategory_name}' нет поставщиков.",
+                    reply_markup=config["markup"]
+                )
+                return
+            
+            # Выводим сообщение с количеством найденных поставщиков
+            config = get_state_config(SupplierSearchStates.viewing_suppliers)
+            
+            # Получаем клавиатуру из конфигурации
+            keyboard = config["markup"]
+            
+            # Обновляем текст кнопки с текущим индексом
+            for row in keyboard.inline_keyboard:
+                for button in row:
+                    if button.callback_data == "current_supplier":
+                        button.text = f"1/{len(supplier_ids)}"
+            
+            # Отправляем информационное сообщение
             await message.answer(
-                f"В подкатегории '{subcategory_name}' нет поставщиков.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-                ])
-            )
-            return
-        
-        # Выводим сообщение с количеством найденных поставщиков
-        await message.answer(
-            f"Найдено поставщиков в подкатегории '{subcategory_name}': {len(suppliers)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-            ])
-        )
-        
-        # Получаем полные данные о поставщиках
-        supplier_ids = [supplier["id"] for supplier in suppliers]
-        
-        full_suppliers = []
-        for supplier_id in supplier_ids:
-            supplier_data = await db_service.get_supplier_by_id(supplier_id)
-            if supplier_data:
-                full_suppliers.append(supplier_data)
-        
-        # Сохраняем список поставщиков и текущий индекс в состояние
-        await state.update_data(
-            suppliers=full_suppliers,
-            current_index=0
-        )
-        
-        # Если есть поставщики, отображаем первого
-        if full_suppliers:
-            current_supplier = full_suppliers[0]
-            total_suppliers = len(full_suppliers)
-            
-            # Создаем клавиатуру для навигации
-            keyboard = [
-                [
-                    InlineKeyboardButton(text="◀️", callback_data="prev_supplier"),
-                    InlineKeyboardButton(text=f"1/{total_suppliers}", callback_data="supplier_info"),
-                    InlineKeyboardButton(text="▶️", callback_data="next_supplier")
-                ],
-                [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-            ]
-            
-            # Отправляем карточку первого поставщика
-            await send_supplier_card(
-                bot=bot,
-                chat_id=message.chat.id,
-                supplier=current_supplier,
-                inline_keyboard=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                f"Найдено поставщиков в подкатегории '{subcategory_name}': {len(supplier_ids)}"
             )
             
-            # Устанавливаем состояние просмотра поставщиков
-            await state.set_state(SupplierSearchStates.viewing_suppliers)
-        else:
-            # Если по какой-то причине не удалось получить полные данные
+            # Обрабатываем поставщиков
+            full_suppliers = []
+            for supplier_id in supplier_ids:
+                try:
+                    # Проверяем, является ли supplier_id словарем или просто числом
+                    sid = supplier_id.get('id') if isinstance(supplier_id, dict) else supplier_id
+                    supplier_data = await DBService.get_supplier_by_id_static(sid)
+                    if supplier_data:
+                        full_suppliers.append(supplier_data)
+                except Exception as e:
+                    logging.error(f"Ошибка при получении данных поставщика {supplier_id}: {str(e)}")
+                    continue
+            
+            # Если есть поставщики, отображаем первого
+            if full_suppliers:
+                current_supplier = full_suppliers[0]
+                
+                # Отправляем карточку первого поставщика с клавиатурой
+                # Функция send_supplier_card теперь возвращает словарь с ID сообщений
+                message_ids = await send_supplier_card(
+                    bot=bot,
+                    chat_id=message.chat.id,
+                    supplier=current_supplier,
+                    keyboard=keyboard
+                )
+                
+                # Сохраняем список поставщиков, текущий индекс и ID сообщений в состоянии
+                await state.update_data(
+                    suppliers=full_suppliers,
+                    current_index=0,
+                    keyboard_message_id=message_ids["keyboard_message_id"],
+                    media_message_ids=message_ids["media_message_ids"]
+                )
+                
+                # Устанавливаем состояние просмотра поставщиков
+                await state.set_state(SupplierSearchStates.viewing_suppliers)
+            else:
+                # Если нет ни одного поставщика с полными данными
+                config = get_state_config(SupplierSearchStates.waiting_subcategory)
+                await message.answer(
+                    "Не удалось загрузить данные о поставщиках. Пожалуйста, попробуйте позже.",
+                    reply_markup=config["markup"]
+                )
+        except Exception as e:
+            # Обработка любых ошибок при работе с БД
+            logging.error(f"Ошибка при получении поставщиков для подкатегории {subcategory_id}: {str(e)}")
+            config = get_state_config(SupplierSearchStates.waiting_subcategory)
             await message.answer(
-                "Не удалось загрузить данные о поставщиках. Пожалуйста, попробуйте позже.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-                ])
+                "Произошла ошибка при загрузке поставщиков. Пожалуйста, попробуйте позже.",
+                reply_markup=config["markup"]
             )
-            # Сбрасываем состояние
-            await state.clear()
         
     except ValueError:
         # Если ввод не число, сообщаем об ошибке
+        config = get_state_config(SupplierSearchStates.waiting_subcategory)
         await message.answer(
-            f"Пожалуйста, введите номер подкатегории числом от 1 до {len(subcategories)}.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-            ])
+            config["error_text"],
+            reply_markup=config["markup"]
+        )
+    except Exception as e:
+        # Обработка любых других ошибок
+        logging.error(f"Неожиданная ошибка при обработке подкатегории: {str(e)}")
+        config = get_state_config(SupplierSearchStates.waiting_subcategory)
+        await message.answer(
+            "Произошла ошибка. Пожалуйста, попробуйте позже или выберите другую подкатегорию.",
+            reply_markup=config["markup"]
         )
 
-# Добавляем обработчики для навигации между поставщиками
-@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "next_supplier")
-async def next_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Переход к следующему поставщику"""
+@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "current_supplier")
+async def handle_current_supplier(callback: CallbackQuery, state: FSMContext):
+    """Обработчик нажатия на кнопку с текущим номером поставщика"""
+    # Просто отвечаем на колбэк без действий
     await callback.answer()
-    
-    # Получаем данные из состояния
-    state_data = await state.get_data()
-    suppliers = state_data.get("suppliers", [])
-    current_index = state_data.get("current_index", 0)
-    
-    # Вычисляем новый индекс (с циклическим переходом)
-    new_index = (current_index + 1) % len(suppliers)
-    
-    # Обновляем индекс в состоянии
-    await state.update_data(current_index=new_index)
-    
-    # Получаем данные о новом поставщике
-    current_supplier = suppliers[new_index]
-    total_suppliers = len(suppliers)
-    
-    # Создаем клавиатуру для навигации
-    keyboard = [
-        [
-            InlineKeyboardButton(text="◀️", callback_data="prev_supplier"),
-            InlineKeyboardButton(text=f"{new_index+1}/{total_suppliers}", callback_data="supplier_info"),
-            InlineKeyboardButton(text="▶️", callback_data="next_supplier")
-        ],
-        [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-    ]
-    
-    # Отправляем или редактируем карточку поставщика
-    await send_supplier_card(
-        bot=bot,
-        chat_id=callback.message.chat.id,
-        supplier=current_supplier,
-        inline_keyboard=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        message_id=callback.message.message_id
-    )
-
-@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "prev_supplier")
-async def prev_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Переход к предыдущему поставщику"""
-    await callback.answer()
-    
-    # Получаем данные из состояния
-    state_data = await state.get_data()
-    suppliers = state_data.get("suppliers", [])
-    current_index = state_data.get("current_index", 0)
-    
-    # Вычисляем новый индекс (с циклическим переходом)
-    new_index = (current_index - 1) % len(suppliers)
-    
-    # Обновляем индекс в состоянии
-    await state.update_data(current_index=new_index)
-    
-    # Получаем данные о новом поставщике
-    current_supplier = suppliers[new_index]
-    total_suppliers = len(suppliers)
-    
-    # Создаем клавиатуру для навигации
-    keyboard = [
-        [
-            InlineKeyboardButton(text="◀️", callback_data="prev_supplier"),
-            InlineKeyboardButton(text=f"{new_index+1}/{total_suppliers}", callback_data="supplier_info"),
-            InlineKeyboardButton(text="▶️", callback_data="next_supplier")
-        ],
-        [InlineKeyboardButton(text="Назад к категориям", callback_data="suppliers_list")]
-    ]
-    
-    # Отправляем или редактируем карточку поставщика
-    await send_supplier_card(
-        bot=bot,
-        chat_id=callback.message.chat.id,
-        supplier=current_supplier,
-        inline_keyboard=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        message_id=callback.message.message_id
-    )
-
-@router.callback_query(SupplierSearchStates.viewing_suppliers, F.data == "supplier_info")
-async def supplier_info(callback: CallbackQuery, state: FSMContext):
-    """Обработчик нажатия на информацию о текущем поставщике"""
-    await callback.answer("Это текущий номер поставщика из общего количества")
-
-# Обработчик на случай, если пользователь хочет вернуться назад
-@router.callback_query(F.data == "suppliers_list", (F.state == SupplierSearchStates.waiting_category) | (F.state == SupplierSearchStates.waiting_subcategory) | (F.state == SupplierSearchStates.viewing_suppliers))
-async def handle_back_to_suppliers_list(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Обработчик для возврата к списку категорий"""
-    await callback.answer()
-    await handle_suppliers_list(callback, bot, state)
 
 def register_handlers(dp):
     dp.include_router(router)
