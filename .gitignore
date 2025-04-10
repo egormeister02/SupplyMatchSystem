@@ -6,3 +6,4 @@ temp*
 .env*
 storage/*
 *.log
+logs/*
