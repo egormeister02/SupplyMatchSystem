@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command as CommandFilter
 
 from app.services import get_db_session, DBService, admin_chat_service
-from app.utils.message_utils import send_supplier_card
+from app.utils.message_utils import send_supplier_card, send_request_card
 from app.config import config
 
 # Инициализируем роутер
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Состояния для работы с админскими действиями
 class AdminStates(StatesGroup):
     waiting_rejection_reason = State()  # Ожидание причины отклонения поставщика
+    waiting_request_rejection_reason = State()  # Ожидание причины отклонения заявки
 
 # Фильтр для проверки, что запрос пришел из админского чата
 async def admin_chat_filter(callback: CallbackQuery) -> bool:
@@ -853,6 +854,326 @@ async def set_admin_chat(message: Message, bot: Bot):
             )
         else:
             await message.answer("❌ Не удалось установить текущий чат как админский.")
+
+# Обработчик для кнопки "Забрать себе" в общем чате администраторов для заявки
+@router.callback_query(F.data.startswith("admin:take_request"), admin_chat_filter)
+async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает нажатие на кнопку "Забрать себе" в чате администраторов для заявки
+    """
+    await callback.answer()
+    
+    # Парсим данные из callback
+    data = admin_chat_service.parse_admin_callback_data(callback.data)
+    request_id = data.get("request_id")
+    
+    if not request_id:
+        await callback.message.answer("Ошибка: ID заявки не указан")
+        return
+    
+    # Получаем данные об админе
+    admin_id = callback.from_user.id
+    admin_username = callback.from_user.username or f"ID:{admin_id}"
+    
+    try:
+        # Получаем данные о заявке
+        request_data = await DBService.get_request_by_id_static(int(request_id))
+        if not request_data:
+            await callback.message.answer(f"Ошибка: заявка с ID {request_id} не найдена")
+            return
+            
+        # Сохраняем данные заявки в состоянии
+        await state.update_data(request_data=request_data)
+        
+        # Обновляем поле verified_by_id в базе данных
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                update_query = """
+                    UPDATE requests 
+                    SET verified_by_id = :admin_id 
+                    WHERE id = :request_id
+                """
+                # Преобразуем request_id в целое число
+                request_id_int = int(request_id)
+                await db_service.execute_query(update_query, {"admin_id": admin_id, "request_id": request_id_int})
+                await db_service.commit()
+                logger.info(f"Заявка {request_id} назначена администратору {admin_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении поля verified_by_id: {e}")
+            # Продолжаем выполнение даже в случае ошибки
+        
+        # Проверяем тип сообщения - имеет ли оно caption (фото, видео и т.д.) или только текст
+        if hasattr(callback.message, 'caption') and callback.message.caption is not None:
+            # Редактируем caption для медиа-сообщений
+            try:
+                await callback.message.edit_caption(
+                    caption=(callback.message.caption or "") + f"\n\n🔄 Заявка назначена администратору @{admin_username}",
+                    reply_markup=None
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отредактировать подпись: {e}")
+                # Если не удалось отредактировать, просто отправляем новое сообщение
+                await callback.message.answer(f"🔄 Заявка назначена администратору @{admin_username}")
+        else:
+            # Для текстовых сообщений редактируем текст
+            try:
+                await callback.message.edit_text(
+                    text=callback.message.text + f"\n\n🔄 Заявка назначена администратору @{admin_username}",
+                    reply_markup=None
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отредактировать текст: {e}")
+                # Если не удалось отредактировать, просто отправляем новое сообщение
+                await callback.message.answer(f"🔄 Заявка назначена администратору @{admin_username}")
+        
+        try:
+            # Создаем inline клавиатуру для действий
+            inline_keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Подтвердить",
+                            callback_data=admin_chat_service.create_admin_callback_data(
+                                "approve_request", 
+                                request_id=request_id
+                            )
+                        ),
+                        InlineKeyboardButton(
+                            text="❌ Отклонить",
+                            callback_data=admin_chat_service.create_admin_callback_data(
+                                "reject_request", 
+                                request_id=request_id
+                            )
+                        )
+                    ]
+                ]
+            )
+            
+            # Отправляем карточку с использованием функции send_request_card
+            request_message = await send_request_card(
+                bot=bot,
+                chat_id=admin_id,
+                request=request_data,
+                keyboard=inline_keyboard,
+                include_video=True  # Включаем видео в группу при просмотре всех фото
+            )
+            
+            # Сохраняем ID сообщения с карточкой в состоянии для последующего редактирования
+            if request_message:
+                await state.update_data(card_message_id=request_message.message_id)
+            
+            logger.info(f"Карточка заявки {request_id} отправлена администратору {admin_id}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при отправке карточки заявки {request_id} админу {admin_id}: {e}")
+            await callback.message.answer(
+                f"Ошибка при отправке карточки заявки в личный чат администратору @{admin_username}. Назначение отменено."
+            )
+    
+    except Exception as e:
+        logger.error(f"Ошибка при назначении заявки {request_id} администратору {admin_id}: {e}")
+        await callback.message.answer(f"Произошла ошибка при назначении заявки: {str(e)}")
+
+# Обработчик для кнопки "Подтвердить" в личном чате админа для заявки
+@router.callback_query(F.data.startswith("admin:approve_request"))
+async def handle_approve_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает подтверждение заявки администратором
+    """
+    await callback.answer()
+    
+    # Парсим данные из callback
+    data = admin_chat_service.parse_admin_callback_data(callback.data)
+    request_id = data.get("request_id")
+    
+    if not request_id:
+        await callback.message.answer("Ошибка: ID заявки не указан")
+        return
+    
+    try:
+        # Получаем данные заявки из состояния
+        state_data = await state.get_data()
+        request_data = state_data.get("request_data")
+        
+        # Если данных нет в состоянии, запрашиваем из базы данных
+        if not request_data:
+            request_data = await DBService.get_request_by_id_static(int(request_id))
+            if not request_data:
+                await callback.message.answer(f"Ошибка: заявка с ID {request_id} не найдена")
+                return
+        
+        await DBService.update_request_status(int(request_id), "approved")
+        
+        logger.info(f"Заявка {request_id} одобрена администратором {callback.from_user.id}")
+        
+        # Получаем пользователя, создавшего заявку
+        user_id = request_data.get("created_by_id")
+        
+        if user_id:
+            # Отправляем уведомление пользователю о подтверждении
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"✅ Ваша заявка #{request_id} была проверена и одобрена администратором."
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
+        
+        # Обновляем сообщение в личном чате админа
+        try:
+            # Проверяем тип сообщения - имеет ли оно caption (фото, видео и т.д.) или только текст
+            if hasattr(callback.message, 'caption') and callback.message.caption is not None:
+                # Редактируем caption для медиа-сообщений, удаляя клавиатуру
+                await callback.message.edit_caption(
+                    caption=callback.message.caption + "\n\n✅ Заявка одобрена",
+                    reply_markup=None
+                )
+            else:
+                # Для текстовых сообщений редактируем текст, удаляя клавиатуру
+                await callback.message.edit_text(
+                    text=callback.message.text + "\n\n✅ Заявка одобрена",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.warning(f"Не удалось отредактировать сообщение с карточкой: {e}")
+            # Просто убираем клавиатуру, если не удалось отредактировать текст
+            await callback.message.edit_reply_markup(reply_markup=None)
+        
+        # Отправляем уведомление админу об успешном одобрении
+        await bot.send_message(
+            chat_id=callback.from_user.id,
+            text=f"✅ Заявка #{request_id} успешно одобрена!"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при одобрении заявки {request_id}: {e}")
+        await callback.message.answer(f"Произошла ошибка при одобрении заявки: {str(e)}")
+
+# Обработчик для кнопки "Отклонить" в личном чате админа для заявки
+@router.callback_query(F.data.startswith("admin:reject_request"))
+async def handle_reject_request_click(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает нажатие на кнопку отклонения заявки
+    """
+    await callback.answer()
+    
+    # Парсим данные из callback
+    data = admin_chat_service.parse_admin_callback_data(callback.data)
+    request_id = data.get("request_id")
+    
+    if not request_id:
+        await callback.message.answer("Ошибка: ID заявки не указан")
+        return
+    
+    # Сохраняем ID заявки в состоянии
+    await state.update_data(request_id=request_id)
+    
+    # Запрашиваем причину отклонения с кнопкой отмены
+    await callback.message.answer(
+        "Пожалуйста, укажите причину отклонения заявки. Это сообщение будет отправлено создателю заявки:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel_rejection")]
+            ]
+        )
+    )
+    
+    # Устанавливаем состояние ожидания причины отклонения
+    await state.set_state(AdminStates.waiting_request_rejection_reason)
+
+# Обработчик для отмены ввода причины отклонения
+@router.callback_query(F.data == "cancel_rejection", AdminStates.waiting_request_rejection_reason)
+async def cancel_rejection(callback: CallbackQuery, state: FSMContext):
+    """
+    Отменяет процесс отклонения заявки
+    """
+    await callback.answer()
+    
+    # Удаляем сообщение с запросом причины
+    await callback.message.delete()
+    
+    # Очищаем состояние ожидания причины отклонения
+    await state.clear()
+    
+    await callback.message.answer("Отклонение заявки отменено")
+
+# Обработчик для получения причины отклонения заявки
+@router.message(AdminStates.waiting_request_rejection_reason)
+async def process_request_rejection_reason(message: Message, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает ввод причины отклонения заявки
+    """
+    # Получаем причину отклонения
+    reason = message.text.strip()
+    
+    if not reason:
+        await message.answer("Пожалуйста, укажите причину отклонения заявки.")
+        return
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    request_id = state_data.get("request_id")
+    request_data = state_data.get("request_data")
+    
+    try:
+        # Если данных нет в состоянии, запрашиваем из базы данных
+        if not request_data:
+            request_data = await DBService.get_request_by_id_static(int(request_id))
+            if not request_data:
+                await message.answer(f"Ошибка: заявка с ID {request_id} не найдена")
+                await state.clear()
+                return
+        
+        # Обновляем статус заявки и сохраняем причину отклонения
+        await DBService.update_request_status(int(request_id), "rejected", rejection_reason=reason)
+        
+        # Получаем пользователя, создавшего заявку
+        user_id = request_data.get("created_by_id")
+        
+        if user_id:
+            # Отправляем уведомление пользователю об отклонении
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"❌ Ваша заявка #{request_id} была отклонена администратором.\n\n"
+                         f"Причина: {reason}\n\n"
+                         f"Вы можете внести изменения и повторно создать заявку."
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
+        
+        # Подтверждаем отклонение заявки
+        await message.answer(
+            f"✅ Заявка #{request_id} успешно отклонена!\n\n"
+            f"Причина: {reason}"
+        )
+        
+        # Обновляем сообщение с карточкой заявки, убирая клавиатуру
+        try:
+            # Находим сообщение с карточкой заявки
+            # Предполагаем, что message_id сохранен в состоянии
+            card_message_id = state_data.get("card_message_id")
+            
+            if card_message_id:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=message.chat.id,
+                        message_id=card_message_id,
+                        reply_markup=None
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось убрать клавиатуру с карточки заявки: {e}")
+        except Exception as e:
+            logger.warning(f"Ошибка при обновлении карточки заявки: {e}")
+        
+        # Очищаем состояние
+        await state.clear()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отклонении заявки {request_id}: {e}")
+        await message.answer(f"Произошла ошибка при отклонении заявки: {str(e)}")
+        await state.clear()
 
 def register_handlers(dp):
     """

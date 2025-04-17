@@ -777,6 +777,16 @@ async def handle_current_supplier(callback: CallbackQuery, state: FSMContext):
     # Просто отвечаем на колбэк без действий
     await callback.answer()
 
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    """Handler for /help command"""
+    help_text = (
+        "Доступные команды:\n"
+        "/start - начать работу с ботом\n"
+        "/help - показать справку"
+    )
+    await message.answer(help_text)
+
 def register_handlers(dp):
     """Register all handlers from this module"""
     dp.include_router(router)

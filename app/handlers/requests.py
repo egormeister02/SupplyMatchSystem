@@ -10,6 +10,7 @@ import tempfile
 import os
 import time
 import re
+from pathlib import Path
 
 from app.services import get_db_session, DBService
 from app.states.states import RequestCreationStates
@@ -20,6 +21,7 @@ from app.utils.message_utils import (
 )
 from app.services.local_storage import local_storage_service
 from app.config.logging import app_logger
+from app.keyboards.inline import get_back_button, get_back_keyboard
 
 # Initialize router with specific name for debugging
 router = Router(name="requests_handlers")
@@ -820,7 +822,7 @@ async def back_to_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot):
     # Переходим к подтверждению создания заявки
     await show_request_confirmation(callback.message, state, bot)
 
-@router.callback_query(RequestCreationStates.confirm_request_creation, F.data == "confirm")
+@router.callback_query(RequestCreationStates.confirm_request_creation, F.data == "confirm_request")
 async def confirm_request_creation(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Подтверждение создания заявки"""
     await callback.answer()
@@ -910,13 +912,48 @@ async def confirm_request_creation(callback: CallbackQuery, state: FSMContext, b
             
             app_logger.info(f"Заявка успешно создана с ID: {request_id}")
             
-            # Здесь можно добавить код для отправки уведомлений поставщикам
+            # Отправляем уведомление в чат администраторов
+            try:
+                from app.services import admin_chat_service
+                
+                # Используем данные из state вместо запроса к БД
+                main_category_name = state_data.get("main_category", "")
+                category_name = state_data.get("subcategory_name", "")
+                
+                # Подготавливаем данные заявки для админского уведомления
+                admin_request_data = {
+                    "id": request_id,
+                    "description": state_data.get("description", ""),
+                    "main_category_name": main_category_name,
+                    "category_name": category_name,
+                    "contact_username": state_data.get("contact_username", ""),
+                    "contact_phone": state_data.get("contact_phone", ""),
+                    "contact_email": state_data.get("contact_email", ""),
+                    "photos": photos
+                }
+                
+                # Отправляем заявку в чат администраторов с помощью нового метода
+                result = await admin_chat_service.send_request_to_admin_chat(
+                    bot=bot,
+                    request_id=request_id,
+                    request_data=admin_request_data
+                )
+                
+                if result:
+                    app_logger.info(f"Заявка {request_id} успешно отправлена в чат администраторов")
+                else:
+                    app_logger.warning(f"Не удалось отправить заявку {request_id} в чат администраторов")
+                
+            except Exception as e:
+                app_logger.error(f"Ошибка при отправке уведомления в чат администраторов: {str(e)}")
+                import traceback
+                app_logger.error(f"Трассировка: {traceback.format_exc()}")
             
             # Удаляем клавиатуру у текущего сообщения
             await remove_keyboard_from_context(bot, callback)
             
             # Формируем сообщение об успешном создании
-            success_message = f"Заявка успешно создана! Уведомления отправлены поставщикам в выбранной категории.\n"
+            success_message = f"Заявка успешно создана, и отправлена на проверку администратору.\n"
             await callback.message.answer(success_message)
             
             # Возвращаемся в меню заявок

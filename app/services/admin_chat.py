@@ -406,5 +406,130 @@ class AdminChatService:
             logger.error(f"Ошибка при отправке карточки поставщика в чат администраторов: {e}")
             return False
 
+    async def send_request_to_admin_chat(self, bot: Bot, request_id: int, request_data: Dict[str, Any], **kwargs) -> bool:
+        """
+        Отправляет карточку заявки в чат администраторов с кнопкой "Забрать себе"
+        
+        :param bot: Экземпляр бота для отправки сообщения
+        :param request_id: ID заявки
+        :param request_data: Данные заявки
+        :param kwargs: Дополнительные параметры для обратной совместимости
+        :return: True если сообщение отправлено успешно, False иначе
+        """
+        # Проверяем настройку ID чата администраторов
+        if not self.admin_chat_id:
+            logger.error("ID чата администраторов (ADMIN_GROUP_CHAT_ID) не настроен в конфигурации!")
+            logger.error("Используйте команду /chatid в нужном чате для получения ID")
+            return False
+        
+        # Логируем информацию о попытке отправки сообщения
+        logger.info(f"Попытка отправки сообщения о заявке {request_id} в чат {self.admin_chat_id}")
+        
+        try:
+            # Формируем текст сообщения с основной информацией о заявке
+            category = request_data.get('category_name', "")
+            main_category = request_data.get('main_category_name', "")
+            description = request_data.get('description', 'Описание отсутствует')
+            photos = request_data.get('photos', [])
+            
+            message_text = (
+                f"📋 НОВАЯ ЗАЯВКА #{request_id}\n\n"
+                f"🔍 Категория: {main_category}\n"
+                f"🔍 Подкатегория: {category}\n"
+                f"📝 Описание: {description[:200]}{'...' if len(description) > 200 else ''}"
+            )
+            
+            # Инициализируем переменную для пути к фото
+            photo_path = None
+            
+            # Берем первую фотографию только если список не пуст
+            if photos and len(photos) > 0:
+                first_photo = photos[0]
+                
+                # Определяем путь к фотографии в зависимости от формата данных
+                if isinstance(first_photo, dict):
+                    if 'storage_path' in first_photo:
+                        photo_path = first_photo['storage_path']
+                    elif 'file_path' in first_photo:
+                        photo_path = first_photo['file_path']
+                else:
+                    photo_path = first_photo
+            
+            # Создаем клавиатуру с кнопкой "Забрать себе"
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📥 Забрать себе на проверку", 
+                            callback_data=self.create_admin_callback_data(
+                                "take_request", 
+                                request_id=request_id
+                            )
+                        )
+                    ]
+                ]
+            )
+            
+            # Пытаемся получить полный путь к файлу фотографии, если она есть
+            input_photo = None
+            if photo_path:
+                try:
+                    # Если путь является существующим файлом, используем его
+                    if os.path.exists(str(photo_path)):
+                        input_photo = FSInputFile(photo_path)
+                    else:
+                        # Пробуем получить полный путь через сервис хранения
+                        full_path = await local_storage_service.get_file_path(str(photo_path))
+                        if full_path and os.path.exists(full_path):
+                            input_photo = FSInputFile(full_path)
+                        else:
+                            # Если не найден полный путь, пытаемся использовать как URL
+                            input_photo = photo_path
+                except Exception as e:
+                    logger.error(f"Ошибка при подготовке фото: {e}")
+                    input_photo = None
+            
+            # Отправляем сообщение с фото или без в зависимости от наличия фото
+            try:
+                if input_photo:
+                    message = await bot.send_photo(
+                        chat_id=self.admin_chat_id,
+                        photo=input_photo,
+                        caption=message_text,
+                        reply_markup=keyboard
+                    )
+                else:
+                    message = await bot.send_message(
+                        chat_id=self.admin_chat_id,
+                        text=message_text,
+                        reply_markup=keyboard
+                    )
+                
+                logger.info(f"Отправлено сообщение о новой заявке {request_id} в чат администраторов")
+                return True
+                
+            except Exception as send_error:
+                logger.error(f"Ошибка при отправке сообщения: {send_error}")
+                
+                # Пробуем отправить только текст, если отправка с фото не удалась
+                if input_photo:
+                    try:
+                        await bot.send_message(
+                            chat_id=self.admin_chat_id,
+                            text=message_text,
+                            reply_markup=keyboard
+                        )
+                        logger.info(f"Отправлено текстовое сообщение о заявке {request_id} (без фото)")
+                        return True
+                    except Exception as text_error:
+                        logger.error(f"Не удалось отправить текстовое сообщение: {text_error}")
+                        return False
+                else:
+                    return False
+            
+        except Exception as e:
+            logger.error(f"Ошибка при отправке карточки заявки в чат администраторов: {e}")
+            return False
+
 # Создаем единственный экземпляр сервиса
 admin_chat_service = AdminChatService()

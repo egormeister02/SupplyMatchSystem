@@ -445,7 +445,7 @@ request_creation_config = {
         "text": "Пожалуйста, проверьте данные вашей заявки:",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Подтвердить", callback_data="confirm")],
+                [InlineKeyboardButton(text="Подтвердить", callback_data="confirm_request")],
                 [InlineKeyboardButton(text="Редактировать данные", callback_data="edit_attributes")],
                 [get_back_button("waiting_email", is_state=True, button_text="Назад к email", state_group="RequestCreationStates")]
             ]

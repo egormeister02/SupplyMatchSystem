@@ -14,8 +14,8 @@ def register_all_handlers(dp):
     handlers_dir = Path(__file__).parent
     
     # Определяем порядок загрузки модулей
-    # Важно загрузить user.py первым, чтобы корректно обрабатывать команду /start
-    module_order = ["user", "base", "actions", "suppliers", "requests", "my_suppliers", "admin", "file_handler"]
+    # Изменяем порядок: модуль requests должен загружаться ПЕРЕД suppliers
+    module_order = ["user", "base", "actions", "requests", "suppliers", "my_suppliers", "admin", "file_handler"]
     
     # Сначала регистрируем модули в определенном порядке
     for module_name in module_order:

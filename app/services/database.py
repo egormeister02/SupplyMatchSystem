@@ -1016,3 +1016,102 @@ class DBService:
         except Exception as e:
             logging.error(f"Error in reapply_supplier_static: {str(e)}")
             return False
+
+    @staticmethod
+    async def get_request_by_id_static(request_id: int) -> dict:
+        """
+        Статический метод для получения заявки по ID
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            dict: Словарь с данными заявки или None, если заявка не найдена
+        """
+        query = """
+            SELECT 
+                r.*,
+                c.name as category_name,
+                mc.name as main_category_name
+            FROM 
+                requests r
+            JOIN
+                categories c ON r.category_id = c.id
+            JOIN
+                main_categories mc ON c.main_category_name = mc.name
+            WHERE 
+                r.id = :request_id
+        """
+        
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                request_data = await db_service.fetch_one(query, {"request_id": request_id})
+                
+                if not request_data:
+                    return None
+                
+                # Получаем фотографии
+                photos_query = """
+                    SELECT f.id, f.file_path, f.type, f.name
+                    FROM files f
+                    WHERE f.request_id = :request_id AND f.type = 'photo'
+                    ORDER BY f.uploaded_at
+                """
+                photos = await db_service.fetch_all(photos_query, {"request_id": request_id})
+                
+                # Получаем видео (если есть)
+                video_query = """
+                    SELECT f.id, f.file_path, f.type, f.name
+                    FROM files f
+                    WHERE f.request_id = :request_id AND f.type = 'video'
+                    ORDER BY f.uploaded_at
+                    LIMIT 1
+                """
+                video_data = await db_service.fetch_one(video_query, {"request_id": request_id})
+                
+                # Преобразуем данные в словарь
+                request_dict = dict(request_data)
+                request_dict["photos"] = [dict(photo) for photo in photos] if photos else []
+                
+                # Преобразуем видео в нужный формат, если оно есть
+                if video_data:
+                    video_dict = dict(video_data)
+                    request_dict["video"] = {
+                        "file_id": video_dict.get("id"),
+                        "file_path": video_dict.get("file_path"),
+                        "storage_path": video_dict.get("file_path")
+                    }
+                else:
+                    request_dict["video"] = None
+                
+                return request_dict
+                
+        except Exception as e:
+            logging.error(f"Ошибка при получении заявки {request_id}: {e}")
+            return None
+
+    @staticmethod
+    async def update_request_status(request_id: int, status: str, rejection_reason: str = None):
+        """
+        Обновляет статус заявки
+        
+        Args:
+            request_id (int): ID заявки
+            status (str): Новый статус (approved/rejected/pending)
+            rejection_reason (str, optional): Причина отклонения (для rejected)
+        """
+        if status == "rejected" and rejection_reason:
+            query = """
+                UPDATE requests
+                SET status = :status, rejection_reason = :rejection_reason
+                WHERE id = :request_id
+            """
+            await DBService.execute(query, {"request_id": request_id, "status": status, "rejection_reason": rejection_reason})
+        else:
+            query = """
+                UPDATE requests
+                SET status = :status
+                WHERE id = :request_id
+            """
+            await DBService.execute(query, {"request_id": request_id, "status": status})
