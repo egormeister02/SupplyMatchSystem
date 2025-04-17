@@ -444,6 +444,18 @@ async def next_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
     current_supplier = suppliers[new_index]
     total_suppliers = len(suppliers)
     
+    # Добавляем отладочное логирование для проверки видео
+    if 'video' in current_supplier:
+        video_data = current_supplier.get('video')
+        logging.info(f"Видео для поставщика {current_supplier.get('id')} (next): {video_data}")
+        
+        # Проверяем и добавляем storage_path для видео, если необходимо
+        if video_data and isinstance(video_data, dict) and 'file_path' in video_data and not 'storage_path' in video_data:
+            video_data['storage_path'] = video_data['file_path']
+            logging.info(f"Добавлен storage_path для видео: {video_data}")
+    else:
+        logging.info(f"У поставщика {current_supplier.get('id')} (next) отсутствует ключ 'video' в данных")
+    
     # Получаем конфигурацию для состояния
     config = get_state_config(SupplierSearchStates.viewing_suppliers)
     keyboard = config["markup"]
@@ -479,7 +491,8 @@ async def next_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
         bot=bot,
         chat_id=callback.message.chat.id,
         supplier=current_supplier,
-        keyboard=keyboard
+        keyboard=keyboard,
+        include_video=True  # Включаем видео в группу при просмотре всех фото
     )
     
     # Обновляем ID сообщений в состоянии
@@ -510,6 +523,18 @@ async def prev_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
     current_supplier = suppliers[new_index]
     total_suppliers = len(suppliers)
     
+    # Добавляем отладочное логирование для проверки видео
+    if 'video' in current_supplier:
+        video_data = current_supplier.get('video')
+        logging.info(f"Видео для поставщика {current_supplier.get('id')} (prev): {video_data}")
+        
+        # Проверяем и добавляем storage_path для видео, если необходимо
+        if video_data and isinstance(video_data, dict) and 'file_path' in video_data and not 'storage_path' in video_data:
+            video_data['storage_path'] = video_data['file_path']
+            logging.info(f"Добавлен storage_path для видео: {video_data}")
+    else:
+        logging.info(f"У поставщика {current_supplier.get('id')} (prev) отсутствует ключ 'video' в данных")
+    
     # Получаем конфигурацию для состояния
     config = get_state_config(SupplierSearchStates.viewing_suppliers)
     keyboard = config["markup"]
@@ -545,7 +570,8 @@ async def prev_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
         bot=bot,
         chat_id=callback.message.chat.id,
         supplier=current_supplier,
-        keyboard=keyboard
+        keyboard=keyboard,
+        include_video=True  # Включаем видео в группу при просмотре всех фото
     )
     
     # Обновляем ID сообщений в состоянии
@@ -674,13 +700,26 @@ async def process_supplier_subcategory(message: Message, state: FSMContext, bot:
             if full_suppliers:
                 current_supplier = full_suppliers[0]
                 
+                # Добавляем отладочное логирование для проверки наличия видео
+                if 'video' in current_supplier:
+                    video_data = current_supplier.get('video')
+                    logging.info(f"Видео для поставщика {current_supplier.get('id')}: {video_data}")
+                    
+                    # Проверяем и добавляем storage_path для видео, если необходимо
+                    if video_data and isinstance(video_data, dict) and 'file_path' in video_data and not 'storage_path' in video_data:
+                        video_data['storage_path'] = video_data['file_path']
+                        logging.info(f"Добавлен storage_path для видео: {video_data}")
+                else:
+                    logging.info(f"У поставщика {current_supplier.get('id')} отсутствует ключ 'video' в данных")
+                
                 # Отправляем карточку первого поставщика с клавиатурой
                 # Функция send_supplier_card теперь возвращает словарь с ID сообщений
                 message_ids = await send_supplier_card(
                     bot=bot,
                     chat_id=message.chat.id,
                     supplier=current_supplier,
-                    keyboard=keyboard
+                    keyboard=keyboard,
+                    include_video=True  # Включаем видео в группу при просмотре всех фото
                 )
                 
                 # Сохраняем список поставщиков, текущий индекс и ID сообщений в состоянии

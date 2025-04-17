@@ -6,11 +6,41 @@ from typing import Union, Optional
 from aiogram import Bot
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, InlineKeyboardMarkup
 from aiogram.types.input_file import FSInputFile
-from aiogram.types import InputMediaPhoto
+from aiogram.types import InputMediaPhoto, InputMediaVideo
 from aiogram.exceptions import TelegramAPIError
 import logging
 import os
 from app.services.local_storage import local_storage_service
+from app.services import get_db_session, DBService
+
+# Вспомогательная функция для получения имени администратора по ID
+async def get_admin_username(admin_id):
+    """
+    Получает username администратора по его ID
+    
+    Args:
+        admin_id: ID администратора
+        
+    Returns:
+        str: Username администратора или его ID как строка
+    """
+    try:
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            user_data = await db_service.get_user_by_id(admin_id)
+            
+            if user_data:
+                if user_data.get("username"):
+                    return f"{user_data.get('username')} (ID:{admin_id})"
+                else:
+                    first_name = user_data.get("first_name", "")
+                    last_name = user_data.get("last_name", "")
+                    full_name = f"{first_name} {last_name}".strip()
+                    return f"{full_name if full_name else 'Администратор'} (ID:{admin_id})"
+            return f"ID:{admin_id}"
+    except Exception as e:
+        logging.error(f"Ошибка при получении данных администратора: {e}")
+        return f"ID:{admin_id}"
 
 async def remove_previous_keyboard(
     bot: Bot, 
@@ -111,7 +141,8 @@ async def send_supplier_card(
     chat_id: int, 
     supplier: dict, 
     keyboard: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None, 
-    message_id: Optional[int] = None
+    message_id: Optional[int] = None,
+    include_video: bool = True  # Добавляем параметр для включения видео в группу
 ) -> dict:
     """
     Отправляет или редактирует карточку поставщика в указанный чат.
@@ -122,6 +153,7 @@ async def send_supplier_card(
         supplier (dict): Словарь с данными о поставщике
         keyboard (Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]]): Клавиатура для сообщения
         message_id (Optional[int]): ID сообщения для редактирования (если None, то отправляется новое)
+        include_video (bool): Включать ли видео в медиа-группу (если True и есть несколько фото)
         
     Returns:
         dict: Словарь с message_ids всех отправленных сообщений:
@@ -172,6 +204,13 @@ async def send_supplier_card(
     photos = supplier.get('photos', [])
     video = supplier.get('video')
     
+    # Добавляем подробное логирование для отладки видео
+    logging.info(f"Данные по медиа поставщика {supplier.get('id')}:")
+    logging.info(f"Фотографии: {len(photos) if photos else 0} шт.")
+    logging.info(f"Наличие видео: {video is not None}")
+    if video:
+        logging.info(f"Подробные данные видео: {video}")
+    
     media_info = []
     if photos:
         media_info.append(f"Фотографий: {len(photos)}")
@@ -189,6 +228,14 @@ async def send_supplier_card(
     text += f"Контакты:\n{contact_info}\n\n"
     text += f"{media_text}"
     
+    # Добавляем информацию о проверяющем администраторе, если она есть
+    verified_by_id = supplier.get('verified_by_id')
+    logging.info(f"verified_by_id из supplier: {verified_by_id}, тип: {type(verified_by_id)}")
+    if verified_by_id:
+        admin_username = await get_admin_username(verified_by_id)
+        logging.info(f"Получено имя админа: {admin_username}")
+        text += f"\n\n🔍 На проверке у администратора: {admin_username}"
+    
     logging.info(f"Фотографии поставщика: {photos}")
     
     # Получаем пути ко всем фотографиям
@@ -203,8 +250,32 @@ async def send_supplier_card(
             except Exception as e:
                 logging.error(f"Ошибка при получении пути к фото: {e}")
     
-    # Если есть message_id и нет фото, то редактируем текстовое сообщение
-    if message_id and not photo_paths:
+    # Получаем путь к видео, если оно есть
+    video_path = None
+    if video and include_video:
+        video_info = video
+        logging.info(f"Начинаем обработку видео: {video_info}")
+        if isinstance(video_info, dict):
+            relative_path = video_info.get('storage_path')
+            if not relative_path:
+                relative_path = video_info.get('file_path')
+            logging.info(f"Относительный путь к видео: {relative_path}")
+            if relative_path:
+                try:
+                    video_path = await local_storage_service.get_file_path(relative_path)
+                    logging.info(f"Полный путь к видео: {video_path}")
+                    if not video_path or not os.path.exists(video_path):
+                        logging.error(f"Видеофайл не найден по пути {video_path}")
+                        video_path = None
+                except Exception as e:
+                    logging.error(f"Ошибка при получении пути к видео: {e}")
+                    video_path = None
+    
+    logging.info(f"Итоговый путь к видео: {video_path}")
+    logging.info(f"Видео будет включено в группу: {include_video and video_path is not None}")
+    
+    # Если есть message_id и нет фото и видео, то редактируем текстовое сообщение
+    if message_id and not photo_paths and not video_path:
         try:
             await bot.edit_message_text(
                 chat_id=chat_id,
@@ -218,8 +289,9 @@ async def send_supplier_card(
             # Если не удалось отредактировать, отправляем новое
             message_id = None
     
-    # Если фотографий больше одной, отправляем их группой
-    if len(photo_paths) > 1:
+    # Если фотографий больше одной или есть фото и видео, отправляем их группой
+    if len(photo_paths) > 1 or (photo_paths and video_path and include_video):
+        logging.info(f"Отправляем медиа-группу. Фото: {len(photo_paths)}, Видео: {video_path is not None}")
         # Если был message_id, удаляем старое сообщение
         if message_id:
             try:
@@ -230,15 +302,32 @@ async def send_supplier_card(
         try:
             # Создаем список медиа-объектов
             media = []
+            
+            # Добавляем все фотографии
             for i, photo_path in enumerate(photo_paths):
-                # Для первой фотографии добавляем подпись
-                caption = text if i == 0 else None
+                # Для первой фотографии добавляем подпись, если нет видео
+                # Если есть видео, добавим подпись к нему (оно будет последним)
+                caption = text if (i == 0 and not video_path) else None
                 media.append(InputMediaPhoto(
                     media=FSInputFile(photo_path),
                     caption=caption
                 ))
             
-            # Отправляем группу фотографий
+            # Добавляем видео в конец группы, если оно есть
+            if video_path and include_video:
+                logging.info(f"Добавляем видео в медиа-группу: {video_path}")
+                # Если мы добавляем видео последним, то подпись идет на нем
+                # Удаляем подпись с первого фото
+                if len(media) > 0:
+                    media[0].caption = None
+                
+                media.append(InputMediaVideo(
+                    media=FSInputFile(video_path),
+                    caption=text
+                ))
+                logging.info("Видео успешно добавлено в медиа-группу")
+            
+            # Отправляем медиа-группу
             media_messages = await bot.send_media_group(
                 chat_id=chat_id,
                 media=media
@@ -265,8 +354,8 @@ async def send_supplier_card(
                 }
                 
         except Exception as e:
-            logging.error(f"Ошибка при отправке фотографий: {e}")
-            # Если не удалось отправить фото, отправляем просто текст
+            logging.error(f"Ошибка при отправке медиа-группы: {e}")
+            # Если не удалось отправить медиа, отправляем просто текст
             msg = await bot.send_message(
                 chat_id=chat_id,
                 text=text,
@@ -309,8 +398,45 @@ async def send_supplier_card(
                 "keyboard_message_id": msg.message_id,
                 "media_message_ids": []
             }
+    # Если есть только видео, отправляем его с текстом и клавиатурой
+    elif video_path:
+        logging.info(f"Отправляем только видео: {video_path}")
+        # Если был message_id, удаляем старое сообщение
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+        
+        try:
+            # Отправляем одно видео с текстом и клавиатурой
+            message = await bot.send_video(
+                chat_id=chat_id,
+                video=FSInputFile(video_path),
+                caption=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": message.message_id,
+                "media_message_ids": [message.message_id]
+            }
+        except Exception as e:
+            logging.error(f"Ошибка при отправке видео: {e}")
+            # Выводим трассировку ошибки для отладки
+            import traceback
+            logging.error(f"Трассировка: {traceback.format_exc()}")
+            # Если не удалось отправить видео, отправляем просто текст
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            return {
+                "keyboard_message_id": msg.message_id,
+                "media_message_ids": []
+            }
     else:
-        # Если нет фото, отправляем текстовое сообщение с клавиатурой
+        # Если нет фото и видео, отправляем текстовое сообщение с клавиатурой
         message = await bot.send_message(
             chat_id=chat_id,
             text=text,

@@ -282,7 +282,7 @@ class DBService:
                     s.id, s.company_name, s.product_name, s.category_id, 
                     s.description, s.country, s.region, s.city, s.address,
                     s.contact_username, s.contact_phone, s.contact_email,
-                    s.created_at, s.status, s.created_by_id, s.tarrif,
+                    s.created_at, s.status, s.created_by_id, s.tarrif, s.verified_by_id,
                     c.name as category_name, mc.name as main_category_name
                 FROM suppliers s
                 LEFT JOIN categories c ON s.category_id = c.id
@@ -312,6 +312,11 @@ class DBService:
                     photos.append(file)
                 elif file["type"] == "video":
                     video = file
+                    # Добавляем поле storage_path, аналогичное file_path,
+                    # для обеспечения совместимости с функцией send_supplier_card
+                    if "file_path" in file and not "storage_path" in file:
+                        file["storage_path"] = file["file_path"]
+                    logging.info(f"Получены данные видео для поставщика {supplier_id}: {file}")
             
             supplier_dict["photos"] = photos
             supplier_dict["video"] = video
@@ -335,7 +340,7 @@ class DBService:
         """
         query = """
             SELECT id FROM suppliers 
-            WHERE category_id = :category_id AND status = 'pending'
+            WHERE category_id = :category_id AND status = 'approved'
             ORDER BY created_at DESC
         """
         return await DBService.fetch_data(query, {"category_id": subcategory_id})
@@ -629,3 +634,189 @@ class DBService:
             logger.error(f"Error executing query: {query[:100]}...")
             logger.error(f"Error details: {str(e)}")
             raise
+
+    async def get_supplier_by_id(self, supplier_id: int) -> dict:
+        """
+        Получает информацию о поставщике по ID.
+        
+        Args:
+            supplier_id (int): ID поставщика
+            
+        Returns:
+            dict: Информация о поставщике или None если поставщик не найден
+        """
+        try:
+            # Получаем основную информацию о поставщике
+            query = """
+                SELECT 
+                    s.id, s.company_name, s.product_name, s.category_id, 
+                    s.description, s.country, s.region, s.city, s.address,
+                    s.contact_username, s.contact_phone, s.contact_email,
+                    s.created_at, s.status, s.created_by_id, s.tarrif, s.verified_by_id,
+                    c.name as category_name
+                FROM suppliers s
+                LEFT JOIN categories c ON s.category_id = c.id
+                WHERE s.id = :supplier_id
+            """
+            result = await self.execute_query(query, {"supplier_id": supplier_id})
+            supplier = result.mappings().first()
+            
+            if not supplier:
+                return None
+                
+            # Получаем файлы поставщика
+            files_query = """
+                SELECT id, type, file_path, name, uploaded_at
+                FROM files
+                WHERE supplier_id = :supplier_id
+                ORDER BY type, uploaded_at
+            """
+            files_result = await self.execute_query(files_query, {"supplier_id": supplier_id})
+            files = files_result.mappings().all()
+            
+            # Преобразуем результат в словарь
+            supplier_dict = dict(supplier)
+            
+            # Формируем структуру с фотографиями и видео
+            photos = []
+            video = None
+            
+            for file in files:
+                file_dict = dict(file)
+                if file_dict["type"] == "photo":
+                    photos.append(file_dict)
+                elif file_dict["type"] == "video":
+                    video = file_dict
+            
+            supplier_dict["photos"] = photos
+            supplier_dict["video"] = video
+            
+            return supplier_dict
+            
+        except Exception as e:
+            logging.error(f"Error getting supplier by ID: {str(e)}")
+            return None
+
+    async def update_supplier(self, supplier_id: int, company_name: str = None, product_name: str = None, 
+                             category_id: int = None, description: str = None, country: str = None, 
+                             region: str = None, city: str = None, address: str = None, 
+                             contact_username: str = None, contact_phone: str = None, 
+                             contact_email: str = None, photos: list = None, video: dict = None) -> bool:
+        """
+        Обновляет информацию о поставщике в базе данных
+        
+        Args:
+            supplier_id (int): ID поставщика для обновления
+            company_name (str, optional): Название компании
+            product_name (str, optional): Название продукта
+            category_id (int, optional): ID категории
+            description (str, optional): Описание продукта
+            country (str, optional): Страна
+            region (str, optional): Регион
+            city (str, optional): Город
+            address (str, optional): Адрес
+            contact_username (str, optional): Контактный username
+            contact_phone (str, optional): Контактный телефон
+            contact_email (str, optional): Контактный email
+            photos (list, optional): Список фотографий
+            video (dict, optional): Видео
+            
+        Returns:
+            bool: True если обновление успешно, иначе False
+        """
+        try:
+            logging.info(f"=== Начало обновления поставщика с ID {supplier_id} ===")
+            
+            # Обновляем данные поставщика
+            update_query = """
+                UPDATE suppliers
+                SET 
+                    company_name = COALESCE(:company_name, company_name),
+                    product_name = COALESCE(:product_name, product_name),
+                    category_id = COALESCE(:category_id, category_id),
+                    description = COALESCE(:description, description),
+                    country = COALESCE(:country, country),
+                    region = COALESCE(:region, region),
+                    city = COALESCE(:city, city),
+                    address = COALESCE(:address, address),
+                    contact_username = COALESCE(:contact_username, contact_username),
+                    contact_phone = COALESCE(:contact_phone, contact_phone),
+                    contact_email = COALESCE(:contact_email, contact_email)
+                WHERE id = :supplier_id
+            """
+            
+            update_params = {
+                "supplier_id": supplier_id,
+                "company_name": company_name,
+                "product_name": product_name,
+                "category_id": category_id,
+                "description": description,
+                "country": country,
+                "region": region,
+                "city": city,
+                "address": address,
+                "contact_username": contact_username,
+                "contact_phone": contact_phone,
+                "contact_email": contact_email
+            }
+            
+            await self.execute_query(update_query, update_params)
+            
+            # Обрабатываем фотографии, если они предоставлены
+            if photos is not None:
+                # Сначала удаляем существующие фотографии
+                delete_photos_query = """
+                    DELETE FROM files
+                    WHERE supplier_id = :supplier_id AND type = 'photo'
+                """
+                await self.execute_query(delete_photos_query, {"supplier_id": supplier_id})
+                
+                # Затем добавляем новые фотографии
+                for i, photo in enumerate(photos, 1):
+                    if isinstance(photo, dict) and "storage_path" in photo:
+                        try:
+                            await self.save_file(
+                                file_path=photo["storage_path"],
+                                file_type="photo",
+                                name=f"photo_{i}.jpg",
+                                supplier_id=supplier_id
+                            )
+                        except Exception as e:
+                            logging.error(f"Ошибка при сохранении фото {i}: {str(e)}")
+                            logging.error(f"Данные фото: {photo}")
+            
+            # Обрабатываем видео, если оно предоставлено
+            if video is not None:
+                # Удаляем существующее видео
+                delete_video_query = """
+                    DELETE FROM files
+                    WHERE supplier_id = :supplier_id AND type = 'video'
+                """
+                await self.execute_query(delete_video_query, {"supplier_id": supplier_id})
+                
+                # Добавляем новое видео, если есть
+                if isinstance(video, dict) and "storage_path" in video and "file_id" in video:
+                    try:
+                        await self.save_file(
+                            file_path=video["storage_path"],
+                            file_type="video",
+                            name=f"video_{video['file_id']}.mp4",
+                            supplier_id=supplier_id
+                        )
+                    except Exception as e:
+                        logging.error(f"Ошибка при сохранении видео: {str(e)}")
+                        logging.error(f"Данные видео: {video}")
+            
+            # Коммитим транзакцию
+            await self.commit()
+            
+            logging.info(f"=== Поставщик с ID {supplier_id} успешно обновлен ===")
+            return True
+            
+        except Exception as e:
+            # Выполняем откат транзакции при ошибке
+            await self.rollback()
+            logging.error(f"=== ОШИБКА при обновлении поставщика {supplier_id}: {str(e)} ===")
+            import traceback
+            logging.error(f"Стек вызовов: {traceback.format_exc()}")
+            return False

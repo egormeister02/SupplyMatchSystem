@@ -44,6 +44,23 @@ action_config = {
     "my_suppliers": {
         "text": "Ваши созданные поставщики:",
         "markup": get_back_keyboard("suppliers", is_state=False, button_text="Назад")
+    },
+
+    "requests_list": {
+        "text": "Меню заявок:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Создать заявку", callback_data="create_request")],
+                [InlineKeyboardButton(text="Мои заявки", callback_data="my_requests")],
+                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:main_menu")]
+            ]
+        ),
+        "parent": "main_menu",
+    },
+
+    "my_requests": {
+        "text": "Ваши заявки:",
+        "markup": get_back_keyboard("requests_list", is_state=False, button_text="Назад")
     }
 }
 

@@ -6,10 +6,11 @@
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
+import logging
 
 from app.utils.message_utils import remove_keyboard_from_context, edit_message_text_and_keyboard
 from app.config.action_config import get_action_config
-from app.states.states import SupplierCreationStates
+from app.states.states import SupplierCreationStates, RequestCreationStates
 from app.states.state_config import get_state_config
 
 # Инициализируем роутер
@@ -101,6 +102,71 @@ async def handle_create_supplier(callback: CallbackQuery, bot: Bot, state: FSMCo
         await callback.message.answer(
             company_name_config["text"],
             reply_markup=company_name_config.get("markup")
+        )
+
+@router.callback_query(F.data == "create_request")
+async def handle_create_request(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """
+    Обработчик для начала процесса создания заявки.
+    Переводит пользователя в состояние выбора категории.
+    """
+    await callback.answer()
+    
+    # Логируем начало создания заявки
+    logging.info(f"Начало создания заявки пользователем: {callback.from_user.id}")
+    
+    # Получаем информацию о пользователе из БД
+    from app.services import get_db_session, DBService
+    
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        user_data = await db_service.get_user_by_id(callback.from_user.id)
+        
+    if not user_data:
+        await callback.message.answer(
+            "Невозможно создать заявку. Пожалуйста, сначала пройдите регистрацию через команду /start."
+        )
+        return
+    
+    # Получаем конфигурацию для первого состояния создания заявки
+    main_category_config = get_state_config(RequestCreationStates.waiting_main_category)
+    
+    # Явно очищаем предыдущее состояние перед установкой нового
+    await state.clear()
+    
+    # Сохраняем информацию о пользователе в состояние ПОСЛЕ очистки
+    await state.update_data(
+        user_id=user_data["tg_id"],
+        username=user_data["username"],
+        first_name=user_data["first_name"],
+        last_name=user_data["last_name"],
+        email=user_data["email"],
+        phone=user_data["phone"]
+    )
+    
+    logging.info(f"Сохранена информация о пользователе в состояние: {user_data}")
+    
+    # Получаем текст с категориями
+    categories_text = await main_category_config["text_func"](state)
+    
+    # Устанавливаем состояние выбора категории
+    await state.set_state(RequestCreationStates.waiting_main_category)
+    logging.info(f"Установлено состояние выбора категории для пользователя {callback.from_user.id}")
+    
+    # Редактируем текущее сообщение
+    result = await edit_message_text_and_keyboard(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        text=categories_text,
+        reply_markup=main_category_config.get("markup")
+    )
+    
+    # Если редактирование не удалось, отправляем новое сообщение
+    if not result:
+        await callback.message.answer(
+            categories_text,
+            reply_markup=main_category_config.get("markup")
         )
 
 @router.callback_query(F.data.startswith("back_to_action:"))

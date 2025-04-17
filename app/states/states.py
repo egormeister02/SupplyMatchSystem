@@ -27,6 +27,18 @@ class SupplierCreationStates(StatesGroup):
     select_attribute_to_edit = State()  # Выбор атрибута для редактирования
     confirm_supplier_creation = State()
 
+class RequestCreationStates(StatesGroup):
+    """Состояния при создании заявки"""
+    waiting_main_category = State()
+    waiting_subcategory = State()
+    waiting_description = State()
+    waiting_photos = State()
+    waiting_tg_username = State()  # Telegram контакт
+    waiting_phone = State()      # Номер телефона
+    waiting_email = State()      # Email
+    select_attribute_to_edit = State()  # Выбор атрибута для редактирования
+    confirm_request_creation = State()
+
 class SupplierSearchStates(StatesGroup):
     """Состояния для поиска поставщиков"""
     waiting_category = State()

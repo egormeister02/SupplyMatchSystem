@@ -40,7 +40,7 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
         state_name = callback_parts[2]
         
         # Импортируем группы состояний
-        from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates
+        from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates
         from aiogram.fsm.state import State
         
         # Определяем группу состояний на основе group_name
@@ -51,6 +51,8 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
             state_group = SupplierCreationStates
         elif group_name == "SupplierSearchStates":
             state_group = SupplierSearchStates
+        elif group_name == "RequestCreationStates":
+            state_group = RequestCreationStates
         else:
             await callback.message.answer(f"Неизвестная группа состояний: {group_name}")
             return

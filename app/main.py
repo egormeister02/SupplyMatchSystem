@@ -12,13 +12,7 @@ from hypercorn.config import Config
 from hypercorn.asyncio import serve
 
 from app.config import config
-from app.handlers import (
-    user,
-    base,
-    actions,
-    suppliers,  # Добавляем новый обработчик
-    admin  # Добавляем обработчик админского чата
-)
+from app.handlers import register_all_handlers
 from app.middlewares import setup_middlewares
 from app.services.database import init_db
 #from app.services.storage import s3_service
@@ -43,15 +37,8 @@ dp = Dispatcher(storage=storage)
 # Quart application initialization
 app = Quart(__name__)
 
-# Register handlers and middleware
-def register_handlers():
-    base.register_handlers(dp)
-    actions.register_handlers(dp)
-    user.register_handlers(dp)
-    suppliers.register_handlers(dp)  # Регистрируем новый обработчик
-    admin.register_handlers(dp)  # Регистрируем обработчики админского чата
-
-register_handlers()  # Вызываем функцию регистрации
+# Регистрация обработчиков и промежуточного ПО
+register_all_handlers(dp)
 setup_middlewares(dp)
 
 @app.before_serving

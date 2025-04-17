@@ -10,8 +10,9 @@ from app.keyboards.inline import (
     get_back_button,
 )
 
-from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates
 from app.services import get_db_session, DBService
+import logging
 
 # Вспомогательные функции для формирования текстов
 def format_numbered_list(items, start_text="", item_formatter=lambda i, idx: f"{idx}. {i}"):
@@ -27,8 +28,12 @@ async def get_categories_text(state: FSMContext = None):
         db_service = DBService(session)
         main_categories = await db_service.get_main_categories()
     
+    app_logger = logging.getLogger("app")
+    app_logger.info(f"Получено {len(main_categories)} категорий из базы данных")
+    
     if state:
         await state.update_data(main_categories=main_categories)
+        app_logger.info("Категории сохранены в состояние")
     
     return format_numbered_list(
         main_categories,
@@ -301,7 +306,7 @@ supplier_creation_config = {
         "back_state": SupplierCreationStates.confirm_supplier_creation,
         "attributes": [
             {"name": "company_name", "display": "Название компании", "state": SupplierCreationStates.waiting_company_name},
-            {"name": "main_category", "display": "Категория", "state": SupplierCreationStates.waiting_main_category},
+            {"name": "main_category", "display": "Категория и подкатегория", "state": SupplierCreationStates.waiting_main_category},
             {"name": "product_name", "display": "Название продукта/услуги", "state": SupplierCreationStates.waiting_product_name},
             {"name": "description", "display": "Описание", "state": SupplierCreationStates.waiting_description},
             {"name": "country", "display": "Страна", "state": SupplierCreationStates.waiting_country},
@@ -347,6 +352,127 @@ supplier_search_config = {
     },
 }
 
+# Конфигурация для состояний создания заявки
+request_creation_config = {
+    # Выбор основной категории
+    RequestCreationStates.waiting_main_category: {
+        "text_func": get_categories_text,
+        "markup": get_back_keyboard("requests_list", is_state=False, button_text="Вернуться к списку заявок"),
+        "back_state": None,
+        "error_text": "Пожалуйста, введите корректный номер категории из списка.",
+    },
+    
+    # Выбор подкатегории
+    RequestCreationStates.waiting_subcategory: {
+        "text_func": get_subcategories_text,
+        "markup": get_back_keyboard("waiting_main_category", is_state=True, button_text="Выбрать другую категорию", state_group="RequestCreationStates"),
+        "back_state": RequestCreationStates.waiting_main_category,
+        "error_text": "Пожалуйста, введите корректный номер подкатегории из списка.",
+    },
+    
+    # Ввод описания заявки
+    RequestCreationStates.waiting_description: {
+        "text": "Введите подробное описание вашей заявки:",
+        "markup": get_back_keyboard("waiting_subcategory", is_state=True, button_text="Назад к подкатегории", state_group="RequestCreationStates"),
+        "back_state": RequestCreationStates.waiting_subcategory,
+    },
+
+    # Загрузка фотографий к заявке
+    RequestCreationStates.waiting_photos: {
+        "text": "Загрузите фотографии к вашей заявке (максимум 3 штуки).\n"
+                "Вы можете отправить несколько фото в одном сообщении или пропустить этот шаг.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_tg_username", is_state=True, button_text="Продолжить", state_group="RequestCreationStates")],
+                [get_back_button("waiting_description", is_state=True, button_text="Назад к описанию", state_group="RequestCreationStates")]
+            ]
+        ),
+        "back_state": RequestCreationStates.waiting_description,
+    },
+    
+    # Ввод контактного Telegram username
+    RequestCreationStates.waiting_tg_username: {
+        "text": "Введите Telegram username для связи.\n"
+               "Это может быть ваш username или другой контакт:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать мой", callback_data="use_my_username")],
+                [get_back_button("waiting_phone", is_state=True, button_text="Пропустить", state_group="RequestCreationStates")],
+                [get_back_button("waiting_photos", is_state=True, button_text="Назад к фото", state_group="RequestCreationStates")]
+            ]
+        ),
+        "back_state": RequestCreationStates.waiting_photos,
+    },
+    
+    # Ввод контактного телефона
+    RequestCreationStates.waiting_phone: {
+        "text": "Введите контактный телефон в международном формате.\n"
+               "Вы можете поделиться своим номером, ввести его вручную или пропустить этот шаг:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать из профиля", callback_data="use_profile_phone")],
+                [InlineKeyboardButton(text="Поделиться контактом", callback_data="share_contact")],
+                [get_back_button("waiting_email", is_state=True, button_text="Пропустить", state_group="RequestCreationStates")],
+                [get_back_button("waiting_tg_username", is_state=True, button_text="Назад к username", state_group="RequestCreationStates")]
+            ]
+        ),
+        "share_contact_markup": ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Поделиться своим", request_contact=True)],
+                [KeyboardButton(text="Отмена")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        ),
+        "back_state": RequestCreationStates.waiting_tg_username,
+    },
+    
+    # Ввод контактного email
+    RequestCreationStates.waiting_email: {
+        "text": "Введите контактный email или выберите другой вариант:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Использовать из профиля", callback_data="use_profile_email")],
+                [InlineKeyboardButton(text="Пропустить", callback_data="skip_email")],
+                [get_back_button("waiting_phone", is_state=True, button_text="Назад к телефону", state_group="RequestCreationStates")]
+            ]
+        ),
+        "back_state": RequestCreationStates.waiting_phone,
+    },
+    
+    # Подтверждение создания заявки
+    RequestCreationStates.confirm_request_creation: {
+        "text": "Пожалуйста, проверьте данные вашей заявки:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Подтвердить", callback_data="confirm")],
+                [InlineKeyboardButton(text="Редактировать данные", callback_data="edit_attributes")],
+                [get_back_button("waiting_email", is_state=True, button_text="Назад к email", state_group="RequestCreationStates")]
+            ]
+        ),
+        "back_state": RequestCreationStates.waiting_email,
+    },
+    
+    # Выбор атрибута для редактирования
+    RequestCreationStates.select_attribute_to_edit: {
+        "text": "Выберите, что вы хотите отредактировать (введите номер):",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Назад к подтверждению", callback_data="back_to_confirm")]
+            ]
+        ),
+        "back_state": RequestCreationStates.confirm_request_creation,
+        "attributes": [
+            {"name": "main_category", "display": "Категория и подкатегория", "state": RequestCreationStates.waiting_main_category},
+            {"name": "description", "display": "Описание заявки", "state": RequestCreationStates.waiting_description},
+            {"name": "photos", "display": "Фотографии", "state": RequestCreationStates.waiting_photos},
+            {"name": "contact_username", "display": "Telegram контакт", "state": RequestCreationStates.waiting_tg_username},
+            {"name": "contact_phone", "display": "Телефон", "state": RequestCreationStates.waiting_phone},
+            {"name": "contact_email", "display": "Email", "state": RequestCreationStates.waiting_email}
+        ]
+    }
+}
+
 # Функция получения конфигурации для состояния
 def get_state_config(state):
     """
@@ -366,6 +492,8 @@ def get_state_config(state):
         config = supplier_creation_config[state]
     elif state in supplier_search_config:
         config = supplier_search_config[state]
+    elif state in request_creation_config:
+        config = request_creation_config[state]
         
     return config
 
