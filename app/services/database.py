@@ -346,13 +346,21 @@ class DBService:
         return await DBService.fetch_data(query, {"category_id": subcategory_id})
     
     @staticmethod
-    async def update_supplier_status(supplier_id: int, status: str):
-        query = """
-            UPDATE suppliers
-            SET status = :status
-            WHERE id = :supplier_id
-        """
-        await DBService.execute(query, {"supplier_id": supplier_id, "status": status})
+    async def update_supplier_status(supplier_id: int, status: str, rejection_reason: str = None):
+        if status == "rejected" and rejection_reason:
+            query = """
+                UPDATE suppliers
+                SET status = :status, rejection_reason = :rejection_reason
+                WHERE id = :supplier_id
+            """
+            await DBService.execute(query, {"supplier_id": supplier_id, "status": status, "rejection_reason": rejection_reason})
+        else:
+            query = """
+                UPDATE suppliers
+                SET status = :status
+                WHERE id = :supplier_id
+            """
+            await DBService.execute(query, {"supplier_id": supplier_id, "status": status})
     
     async def save_user(
         self, 
@@ -544,7 +552,7 @@ class DBService:
             # Выполняем откат транзакции при ошибке
             await self.rollback()
             logging.error(f"=== ОШИБКА при сохранении поставщика: {str(e)} ===")
-            logging.error(f"Тип ошибки: {type(e).__name__}")
+            logger.error(f"Тип ошибки: {type(e).__name__}")
             import traceback
             logging.error(f"Стек вызовов: {traceback.format_exc()}")
             raise
@@ -819,4 +827,192 @@ class DBService:
             logging.error(f"=== ОШИБКА при обновлении поставщика {supplier_id}: {str(e)} ===")
             import traceback
             logging.error(f"Стек вызовов: {traceback.format_exc()}")
+            return False
+
+    async def get_user_suppliers(self, user_id: int) -> list:
+        """
+        Получает список поставщиков, созданных указанным пользователем.
+        
+        Args:
+            user_id (int): ID пользователя-создателя
+            
+        Returns:
+            list: Список словарей с информацией о поставщиках
+        """
+        try:
+            query = """
+                SELECT 
+                    s.id, s.company_name, s.product_name, s.category_id, 
+                    s.description, s.country, s.region, s.city, s.address,
+                    s.contact_username, s.contact_phone, s.contact_email,
+                    s.created_at, s.status, s.rejection_reason, s.created_by_id, s.tarrif, s.verified_by_id,
+                    c.name as category_name, mc.name as main_category_name
+                FROM suppliers s
+                LEFT JOIN categories c ON s.category_id = c.id
+                LEFT JOIN main_categories mc ON c.main_category_name = mc.name
+                WHERE s.created_by_id = :user_id
+                ORDER BY s.created_at DESC
+            """
+            result = await self.execute_query(query, {"user_id": user_id})
+            suppliers = result.mappings().all()
+            
+            if not suppliers:
+                return []
+            
+            supplier_list = []
+            for supplier in suppliers:
+                supplier_dict = dict(supplier)
+                
+                # Получаем файлы для каждого поставщика
+                files_query = """
+                    SELECT id, type, file_path, name, uploaded_at
+                    FROM files
+                    WHERE supplier_id = :supplier_id
+                    ORDER BY type, uploaded_at
+                """
+                files_result = await self.execute_query(files_query, {"supplier_id": supplier_dict["id"]})
+                files = files_result.mappings().all()
+                
+                # Формируем структуру с фотографиями и видео
+                photos = []
+                video = None
+                
+                for file in files:
+                    file_dict = dict(file)
+                    if file_dict["type"] == "photo":
+                        photos.append(file_dict)
+                    elif file_dict["type"] == "video":
+                        video = file_dict
+                
+                supplier_dict["photos"] = photos
+                supplier_dict["video"] = video
+                
+                supplier_list.append(supplier_dict)
+            
+            return supplier_list
+            
+        except Exception as e:
+            logging.error(f"Error getting suppliers for user {user_id}: {str(e)}")
+            return []
+            
+    @staticmethod
+    async def get_user_suppliers_static(user_id: int) -> list:
+        """
+        Статический метод для получения поставщиков пользователя.
+        
+        Args:
+            user_id (int): ID пользователя-создателя
+            
+        Returns:
+            list: Список словарей с информацией о поставщиках
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.get_user_suppliers(user_id)
+        except Exception as e:
+            logging.error(f"Error in get_user_suppliers_static: {str(e)}")
+            return []
+    
+    async def delete_supplier(self, supplier_id: int) -> bool:
+        """
+        Удаляет поставщика из базы данных.
+        
+        Args:
+            supplier_id (int): ID поставщика для удаления
+            
+        Returns:
+            bool: True если удаление прошло успешно, иначе False
+        """
+        try:
+            # Сначала удаляем связанные файлы
+            delete_files_query = """
+                DELETE FROM files
+                WHERE supplier_id = :supplier_id
+            """
+            await self.execute_query(delete_files_query, {"supplier_id": supplier_id})
+            
+            # Затем удаляем самого поставщика
+            delete_query = """
+                DELETE FROM suppliers
+                WHERE id = :supplier_id
+            """
+            await self.execute_query(delete_query, {"supplier_id": supplier_id})
+            
+            # Коммитим транзакцию
+            await self.commit()
+            
+            return True
+            
+        except Exception as e:
+            # Выполняем откат транзакции при ошибке
+            await self.rollback()
+            logging.error(f"Error deleting supplier {supplier_id}: {str(e)}")
+            return False
+            
+    @staticmethod
+    async def delete_supplier_static(supplier_id: int) -> bool:
+        """
+        Статический метод для удаления поставщика.
+        
+        Args:
+            supplier_id (int): ID поставщика для удаления
+            
+        Returns:
+            bool: True если удаление прошло успешно, иначе False
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.delete_supplier(supplier_id)
+        except Exception as e:
+            logging.error(f"Error in delete_supplier_static: {str(e)}")
+            return False
+            
+    async def reapply_supplier(self, supplier_id: int) -> bool:
+        """
+        Отправляет отклоненного поставщика на повторную проверку.
+        
+        Args:
+            supplier_id (int): ID поставщика
+            
+        Returns:
+            bool: True если операция прошла успешно, иначе False
+        """
+        try:
+            update_query = """
+                UPDATE suppliers
+                SET status = 'pending', rejection_reason = NULL
+                WHERE id = :supplier_id AND status = 'rejected'
+            """
+            await self.execute_query(update_query, {"supplier_id": supplier_id})
+            
+            # Коммитим транзакцию
+            await self.commit()
+            
+            return True
+            
+        except Exception as e:
+            # Выполняем откат транзакции при ошибке
+            await self.rollback()
+            logging.error(f"Error reapplying supplier {supplier_id}: {str(e)}")
+            return False
+            
+    @staticmethod
+    async def reapply_supplier_static(supplier_id: int) -> bool:
+        """
+        Статический метод для отправки поставщика на повторную проверку.
+        
+        Args:
+            supplier_id (int): ID поставщика
+            
+        Returns:
+            bool: True если операция прошла успешно, иначе False
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.reapply_supplier(supplier_id)
+        except Exception as e:
+            logging.error(f"Error in reapply_supplier_static: {str(e)}")
             return False

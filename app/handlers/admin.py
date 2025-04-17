@@ -285,7 +285,8 @@ async def process_rejection_reason(message: Message, state: FSMContext, bot: Bot
                 await state.clear()
                 return
         
-        await DBService.update_supplier_status(int(supplier_id), "rejected")
+        # Обновляем статус поставщика и сохраняем причину отклонения
+        await DBService.update_supplier_status(int(supplier_id), "rejected", rejection_reason=reason)
         
         # Получаем пользователя, создавшего поставщика
         user_id = supplier_data.get("created_by_id")

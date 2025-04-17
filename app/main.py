@@ -18,11 +18,7 @@ from app.services.database import init_db
 #from app.services.storage import s3_service
 from app.config.logging import app_logger
 
-# Logging setup
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Логгер для main.py, используем существующую конфигурацию из app.config.logging
 logger = logging.getLogger(__name__)
 
 # Timezone setup

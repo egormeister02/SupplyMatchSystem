@@ -45,3 +45,18 @@ class SupplierSearchStates(StatesGroup):
     waiting_subcategory = State()
     viewing_suppliers = State()
 
+class AdminStates(StatesGroup):
+    waiting_admin_command = State()
+    waiting_user_id = State()
+    waiting_supplier_id = State()
+    waiting_rejection_reason = State()
+    waiting_admin_edit_supplier = State()
+    waiting_admin_edit_attribute = State()
+    waiting_admin_confirmation = State()
+
+# Новые состояния для работы с "Мои поставщики"
+class MySupplierStates(StatesGroup):
+    viewing_suppliers = State()    # Просмотр поставщиков пользователя
+    confirm_delete = State()       # Подтверждение удаления поставщика
+    confirm_reapply = State()      # Подтверждение повторной отправки на проверку
+

@@ -39,6 +39,7 @@ CREATE TABLE suppliers (
     contact_email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     status VARCHAR(255) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+    rejection_reason TEXT,
     verified_by_id BIGINT,
     created_by_id BIGINT,
     tarrif VARCHAR(255),
@@ -59,6 +60,7 @@ CREATE TABLE requests (
     contact_email VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+    rejection_reason TEXT,
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
@@ -73,8 +75,8 @@ CREATE TABLE files (
     supplier_id INTEGER,
     uploaded_at TIMESTAMP DEFAULT NOW(),
 
-    FOREIGN KEY (request_id) REFERENCES requests(id),
-    FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+    FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 );
 
 -- Create matches table

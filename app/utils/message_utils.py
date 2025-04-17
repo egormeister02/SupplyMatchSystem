@@ -142,7 +142,8 @@ async def send_supplier_card(
     supplier: dict, 
     keyboard: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None, 
     message_id: Optional[int] = None,
-    include_video: bool = True  # Добавляем параметр для включения видео в группу
+    include_video: bool = True,  # Параметр для включения видео в группу
+    show_status: bool = False    # Параметр для отображения статуса поставщика
 ) -> dict:
     """
     Отправляет или редактирует карточку поставщика в указанный чат.
@@ -154,6 +155,7 @@ async def send_supplier_card(
         keyboard (Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]]): Клавиатура для сообщения
         message_id (Optional[int]): ID сообщения для редактирования (если None, то отправляется новое)
         include_video (bool): Включать ли видео в медиа-группу (если True и есть несколько фото)
+        show_status (bool): Показывать ли статус поставщика
         
     Returns:
         dict: Словарь с message_ids всех отправленных сообщений:
@@ -228,13 +230,16 @@ async def send_supplier_card(
     text += f"Контакты:\n{contact_info}\n\n"
     text += f"{media_text}"
     
-    # Добавляем информацию о проверяющем администраторе, если она есть
-    verified_by_id = supplier.get('verified_by_id')
-    logging.info(f"verified_by_id из supplier: {verified_by_id}, тип: {type(verified_by_id)}")
-    if verified_by_id:
-        admin_username = await get_admin_username(verified_by_id)
-        logging.info(f"Получено имя админа: {admin_username}")
-        text += f"\n\n🔍 На проверке у администратора: {admin_username}"
+    # Добавляем информацию о статусе поставщика, если запрошено
+    if show_status:
+        status = supplier.get('status', 'pending')
+        status_emoji = "✅" if status == "approved" else "❌" if status == "rejected" else "⏳"
+        status_text = "Одобрен" if status == "approved" else "Отклонен" if status == "rejected" else "На проверке"
+        text += f"\n\nСтатус: {status_emoji} {status_text}"
+        
+        # Если поставщик отклонен и есть причина отклонения, показываем её
+        if status == "rejected" and supplier.get("rejection_reason"):
+            text += f"\n\n❗ Причина отклонения: {supplier.get('rejection_reason')}"
     
     logging.info(f"Фотографии поставщика: {photos}")
     

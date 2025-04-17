@@ -17,42 +17,37 @@ from app.keyboards.inline import (
 # Конфигурация действий меню
 action_config = {
     "main_menu": {
-        "text": "Главное меню. Выберите действие:",
+        "text": "Главное меню. Выберите нужный раздел:",
         "markup": get_main_user_menu_keyboard(),
         "parent": None,  # У главного меню нет родителя
     },
     
     "suppliers": {
-        "text": "Меню поставщиков:",
+        "text": "Выберите действие с поставщиками:",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Создать поставщика", callback_data="create_supplier")],
-                [InlineKeyboardButton(text="Мои поставщики", callback_data="my_suppliers")],
+                [InlineKeyboardButton(text="Мои поставщики", callback_data="view_my_suppliers")],
                 [InlineKeyboardButton(text="База поставщиков", callback_data="suppliers_list")],
-                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:main_menu")]
+                [get_back_button("main_menu", is_state=False, button_text="Главное меню")]
             ]
         ),
         "parent": "main_menu",
     },
     
     "favorites_list": {
-        "text": "Избранные поставщики:",
-        "markup": None,  # Будет заполнено после обновления inline.py
+        "text": "Раздел избранного (в разработке)",
+        "markup": get_main_user_menu_keyboard(),
         "parent": "main_menu",
     },
 
-    "my_suppliers": {
-        "text": "Ваши созданные поставщики:",
-        "markup": get_back_keyboard("suppliers", is_state=False, button_text="Назад")
-    },
-
     "requests_list": {
-        "text": "Меню заявок:",
+        "text": "Раздел заявок:",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Создать заявку", callback_data="create_request")],
                 [InlineKeyboardButton(text="Мои заявки", callback_data="my_requests")],
-                [InlineKeyboardButton(text="Назад", callback_data="back_to_action:main_menu")]
+                [get_back_button("main_menu", is_state=False, button_text="Главное меню")]
             ]
         ),
         "parent": "main_menu",
@@ -61,6 +56,13 @@ action_config = {
     "my_requests": {
         "text": "Ваши заявки:",
         "markup": get_back_keyboard("requests_list", is_state=False, button_text="Назад")
+    },
+
+    "help_action": {
+        "text": "Добро пожаловать в раздел помощи!\n\n"
+                "Здесь вы можете найти ответы на часто задаваемые вопросы и инструкции по использованию нашего бота.\n\n"
+                "Если у вас остались вопросы, обратитесь к администратору.",
+        "markup": get_main_user_menu_keyboard()
     }
 }
 

@@ -6,9 +6,11 @@ import logging
 
 from app.utils.message_utils import remove_keyboard_from_context, edit_message_text_and_keyboard
 from app.states.state_config import get_state_config, get_previous_state
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates
+from app.config.logging import app_logger
 
-# Создаем роутер для базовых команд
-router = Router()
+# Создаем роутер для базовых команд с более низким приоритетом
+router = Router(name="base_commands")
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
@@ -40,7 +42,6 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
         state_name = callback_parts[2]
         
         # Импортируем группы состояний
-        from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates
         from aiogram.fsm.state import State
         
         # Определяем группу состояний на основе group_name
@@ -53,6 +54,8 @@ async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: F
             state_group = SupplierSearchStates
         elif group_name == "RequestCreationStates":
             state_group = RequestCreationStates
+        elif group_name == "MySupplierStates":
+            state_group = MySupplierStates
         else:
             await callback.message.answer(f"Неизвестная группа состояний: {group_name}")
             return

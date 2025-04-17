@@ -9,20 +9,24 @@ from typing import Union
 
 from aiogram import Router, F, Bot, types
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from app.services import get_db_session, DBService
-from app.states.states import RegistrationStates, SupplierSearchStates
+from app.states.states import RegistrationStates, SupplierSearchStates, SupplierCreationStates, RequestCreationStates
 from app.states.state_config import get_state_config
 from app.keyboards.inline import (
     get_main_user_menu_keyboard,
     get_back_keyboard
 )
 from app.utils.message_utils import remove_keyboard_from_context, send_supplier_card
+from app.config.config import get_admin_chat_id
+from app.config.action_config import get_action_config
+from app.config.logging import app_logger
 
-# Initialize router
-router = Router()
+# Initialize router with higher priority for commands
+router = Router(name="user_commands")
 
 # Validation patterns
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
@@ -34,14 +38,17 @@ def is_valid_email(email):
         return False
     return bool(EMAIL_PATTERN.match(email))
 
+# Explicitly set start command handler
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     """Handler for /start command"""
+    app_logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
     user_id = message.from_user.id
     username = message.from_user.username
     
     # Check if user exists in database
     user_exists = await DBService.check_user_exists_static(user_id)
+    app_logger.info(f"Пользователь существует: {user_exists}")
         
     if user_exists:
         # User exists, show main menu
@@ -771,4 +778,5 @@ async def handle_current_supplier(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 def register_handlers(dp):
+    """Register all handlers from this module"""
     dp.include_router(router)
