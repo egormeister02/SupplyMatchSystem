@@ -64,7 +64,8 @@ async def startup():
     await bot.delete_webhook()
     await bot.set_webhook(
         url=webhook_url,
-        secret_token=getattr(config, 'WEBHOOK_SECRET', None)
+        secret_token=getattr(config, 'WEBHOOK_SECRET', None),
+        drop_pending_updates=True
     )
     
     # Set bot commands

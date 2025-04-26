@@ -8,15 +8,77 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
 
-from app.states.states import MySupplierStates
+from app.states.states import MySupplierStates, SupplierCreationStates
 from app.services import get_db_session, DBService
 from app.utils.message_utils import send_supplier_card
 from app.config.action_config import get_action_config
 from app.config.logging import app_logger
-from app.keyboards.inline import get_back_button, get_back_keyboard, get_main_user_menu_keyboard
+from app.keyboards.inline import get_back_button, get_main_user_menu_keyboard
 
 # Инициализируем роутер
 router = Router()
+
+# Функция-хелпер для показа списка поставщиков пользователя без использования callback
+async def show_user_suppliers(user_id: int, chat_id: int, state: FSMContext, bot: Bot):
+    """
+    Вспомогательная функция для отображения списка поставщиков пользователя.
+    Может быть вызвана напрямую из других обработчиков.
+    
+    Args:
+        user_id (int): ID пользователя
+        chat_id (int): ID чата для отправки сообщений
+        state (FSMContext): Контекст состояния
+        bot (Bot): Экземпляр бота
+    """
+    try:
+        # Получаем список поставщиков пользователя
+        suppliers = await DBService.get_user_suppliers_static(user_id)
+        
+        # Если поставщиков нет
+        if not suppliers:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="У вас пока нет созданных поставщиков. Вы можете создать нового поставщика через меню поставщиков."
+            )
+            return
+            
+        # Сохраняем список поставщиков в состояние
+        await state.update_data(
+            user_suppliers=suppliers,
+            current_index=0
+        )
+        
+        # Устанавливаем состояние просмотра
+        await state.set_state(MySupplierStates.viewing_suppliers)
+        
+        # Получаем текущий индекс и поставщика
+        current_index = 0
+        supplier = suppliers[current_index]
+        
+        # Создаем клавиатуру для навигации и управления
+        keyboard = create_supplier_navigation_keyboard(supplier, current_index, len(suppliers))
+        
+        # Отправляем карточку поставщика
+        result = await send_supplier_card(
+            bot=bot,
+            chat_id=chat_id,
+            supplier=supplier,
+            keyboard=keyboard,
+            show_status=True  # Показываем статус поставщика
+        )
+        
+        # Сохраняем message_id для дальнейшего использования
+        await state.update_data(
+            keyboard_message_id=result.get("keyboard_message_id"),
+            media_message_ids=result.get("media_message_ids", [])
+        )
+        
+    except Exception as e:
+        app_logger.error(f"Ошибка при получении поставщиков пользователя: {e}")
+        await bot.send_message(
+            chat_id=chat_id,
+            text="Произошла ошибка при загрузке ваших поставщиков. Пожалуйста, попробуйте позже."
+        )
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot, state: FSMContext):
@@ -70,57 +132,24 @@ async def handle_view_my_suppliers(callback: CallbackQuery, state: FSMContext, b
     Показывает список поставщиков пользователя.
     """
     await callback.answer()
-    await callback.message.delete()
     
-    user_id = callback.from_user.id
-    
+    # Проверяем, нужно ли удалять предыдущее сообщение
+    # Если это прямой вызов с кнопки, то сообщение нужно удалить
+    # Если это вызов из другого обработчика, например после редактирования, то удалять не нужно
     try:
-        # Получаем список поставщиков пользователя
-        suppliers = await DBService.get_user_suppliers_static(user_id)
-        
-        # Если поставщиков нет
-        if not suppliers:
-            await callback.message.answer(
-                "У вас пока нет созданных поставщиков. Вы можете создать нового поставщика через меню поставщиков."
-            )
-            return
-            
-        # Сохраняем список поставщиков в состояние
-        await state.update_data(
-            user_suppliers=suppliers,
-            current_index=0
-        )
-        
-        # Устанавливаем состояние просмотра
-        await state.set_state(MySupplierStates.viewing_suppliers)
-        
-        # Получаем текущий индекс и поставщика
-        current_index = 0
-        supplier = suppliers[current_index]
-        
-        # Создаем клавиатуру для навигации и управления
-        keyboard = create_supplier_navigation_keyboard(supplier, current_index, len(suppliers))
-        
-        # Отправляем карточку поставщика
-        result = await send_supplier_card(
-            bot=bot,
-            chat_id=callback.message.chat.id,
-            supplier=supplier,
-            keyboard=keyboard,
-            show_status=True  # Показываем статус поставщика
-        )
-        
-        # Сохраняем message_id для дальнейшего использования
-        await state.update_data(
-            keyboard_message_id=result.get("keyboard_message_id"),
-            media_message_ids=result.get("media_message_ids", [])
-        )
-        
+        # Пытаемся удалить сообщение с кнопкой
+        if callback.data == "view_my_suppliers":
+            await callback.message.delete()
     except Exception as e:
-        app_logger.error(f"Ошибка при получении поставщиков пользователя: {e}")
-        await callback.message.answer(
-            "Произошла ошибка при загрузке ваших поставщиков. Пожалуйста, попробуйте позже."
-        )
+        app_logger.warning(f"Не удалось удалить предыдущее сообщение: {e}")
+    
+    # Вызываем общую функцию для показа поставщиков
+    await show_user_suppliers(
+        user_id=callback.from_user.id,
+        chat_id=callback.message.chat.id,
+        state=state,
+        bot=bot
+    )
 
 # Функция для создания клавиатуры навигации по поставщикам
 def create_supplier_navigation_keyboard(supplier, current_index, total_count):
@@ -610,17 +639,107 @@ async def cancel_reapply(callback: CallbackQuery, state: FSMContext):
 
 # Обработчик для кнопки редактирования (заглушка, будет реализована позже)
 @router.callback_query(MySupplierStates.viewing_suppliers, F.data.startswith("edit_supplier:"))
-async def edit_supplier(callback: CallbackQuery):
+async def edit_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """
-    Обработчик для редактирования поставщика (заглушка).
+    Обработчик для редактирования поставщика.
+    Получает данные поставщика из БД и переходит в режим редактирования.
     """
     await callback.answer()
     
-    # Здесь будет реализован функционал редактирования поставщика
-    await callback.message.answer(
-        "Функционал редактирования поставщика будет реализован в следующем обновлении. "
-        "Пока вы можете удалить поставщика и создать нового."
-    )
+    try:
+        # Получаем ID поставщика из callback_data
+        supplier_id = int(callback.data.split(":")[1])
+        
+        # Получаем полную информацию о поставщике из БД
+        supplier_data = await DBService.get_supplier_by_id_static(supplier_id)
+        
+        if not supplier_data:
+            await callback.message.answer("Ошибка: не удалось получить информацию о поставщике")
+            return
+        
+        # Сохраняем данные поставщика в состояние для редактирования
+        await state.update_data(
+            # Основные данные
+            supplier_id=supplier_id,  # ID поставщика для обновления
+            company_name=supplier_data.get("company_name", ""),
+            product_name=supplier_data.get("product_name", ""),
+            description=supplier_data.get("description", ""),
+            
+            # Данные о категории
+            main_category=supplier_data.get("main_category_name", ""),
+            subcategory_name=supplier_data.get("category_name", ""),
+            category_id=supplier_data.get("category_id"),
+            
+            # Местоположение
+            country=supplier_data.get("country", ""),
+            region=supplier_data.get("region", ""),
+            city=supplier_data.get("city", ""),
+            address=supplier_data.get("address", ""),
+            
+            # Контактные данные
+            contact_username=supplier_data.get("contact_username", ""),
+            contact_phone=supplier_data.get("contact_phone", ""),
+            contact_email=supplier_data.get("contact_email", ""),
+            
+            # Медиафайлы
+            photos=supplier_data.get("photos", []),
+            video=supplier_data.get("video"),
+            
+            # Устанавливаем флаги режима редактирования
+            is_edit_mode=True,  # Флаг режима редактирования
+            from_my_suppliers=True,  # Флаг, что редактирование началось из "Мои поставщики"
+            
+            # Сохраняем статус поставщика для проверки необходимости повторной отправки
+            status=supplier_data.get("status", ""),
+            
+            # Сохраняем ID пользователя
+            user_id=callback.from_user.id
+        )
+        
+        # Удаляем сообщения с карточкой поставщика
+        state_data = await state.get_data()
+        keyboard_message_id = state_data.get("keyboard_message_id")
+        media_message_ids = state_data.get("media_message_ids", [])
+        
+        try:
+            for msg_id in media_message_ids:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+            
+            if keyboard_message_id and keyboard_message_id not in media_message_ids:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+        except Exception as e:
+            app_logger.error(f"Ошибка при удалении сообщений карточки: {e}")
+        
+        # Сразу переходим к выбору атрибута для редактирования, минуя шаг подтверждения
+        # Получаем конфигурацию для выбора атрибута
+        from app.states.state_config import get_state_config
+        from app.states.states import SupplierCreationStates
+        
+        edit_config = get_state_config(SupplierCreationStates.select_attribute_to_edit)
+        attributes = edit_config.get("attributes", [])
+        
+        # Формируем нумерованный список атрибутов
+        attributes_text = edit_config.get("text", "Выберите, что вы хотите отредактировать (введите номер):") + "\n\n"
+        for idx, attr in enumerate(attributes, 1):
+            attributes_text += f"{idx}. {attr['display']}\n"
+        
+        # Устанавливаем состояние выбора атрибута
+        await state.set_state(SupplierCreationStates.select_attribute_to_edit)
+        
+        # Сохраняем список атрибутов в состоянии
+        await state.update_data(edit_attributes=attributes)
+        
+        # Отправляем сообщение с выбором атрибутов
+        await callback.message.answer(
+            attributes_text,
+            reply_markup=edit_config.get("markup")
+        )
+        
+    except Exception as e:
+        app_logger.error(f"Ошибка при подготовке к редактированию поставщика: {e}")
+        await callback.message.answer(
+            "Произошла ошибка при подготовке к редактированию поставщика. Пожалуйста, попробуйте позже."
+        )
 
 # Обработчик для кнопки с текущим индексом поставщика
 @router.callback_query(MySupplierStates.viewing_suppliers, F.data == "current_my_supplier")

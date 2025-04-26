@@ -8,9 +8,10 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command as CommandFilter
+from app.utils.message_utils import send_request_card, remove_keyboard_from_context
 
 from app.services import get_db_session, DBService, admin_chat_service
-from app.utils.message_utils import send_supplier_card, send_request_card
+from app.utils.message_utils import send_supplier_card
 from app.config import config
 
 # Инициализируем роутер
@@ -885,13 +886,41 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
         # Сохраняем данные заявки в состоянии
         await state.update_data(request_data=request_data)
         
+        # Проверка и корректировка структуры фотографий
+        photos = request_data.get("photos", [])
+        fixed_photos = []
+        
+        logger.info(f"Подготовка фотографий для отправки админу {admin_id}, исходное количество: {len(photos)}")
+        
+        for i, photo in enumerate(photos):
+            if isinstance(photo, dict):
+                # Создаем новую копию фото для безопасной модификации
+                fixed_photo = photo.copy()
+                
+                # Убеждаемся, что file_path существует
+                if 'file_path' not in fixed_photo and 'storage_path' in fixed_photo:
+                    fixed_photo['file_path'] = fixed_photo['storage_path']
+                    logger.info(f"Фото {i+1}: добавлено поле file_path из storage_path")
+                elif 'file_path' not in fixed_photo:
+                    logger.warning(f"Фото {i+1} не содержит ни file_path, ни storage_path: {photo}")
+                    continue
+                
+                fixed_photos.append(fixed_photo)
+                logger.info(f"Фото {i+1} успешно подготовлено")
+            else:
+                logger.warning(f"Фото {i+1} имеет неверный формат: {photo}")
+        
+        # Заменяем список фотографий на исправленный
+        request_data["photos"] = fixed_photos
+        logger.info(f"Итоговое количество подготовленных фотографий: {len(fixed_photos)}")
+        
         # Обновляем поле verified_by_id в базе данных
         try:
             async with get_db_session() as session:
                 db_service = DBService(session)
                 update_query = """
                     UPDATE requests 
-                    SET verified_by_id = :admin_id 
+                    SET verified_by = :admin_id 
                     WHERE id = :request_id
                 """
                 # Преобразуем request_id в целое число
@@ -951,6 +980,13 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
             )
             
             # Отправляем карточку с использованием функции send_request_card
+            logger.info(f"Отправляем карточку заявки {request_id} админу {admin_id} со всеми фотографиями")
+            logger.info(f"Количество фотографий в запросе: {len(request_data.get('photos', []))}")
+            for i, photo in enumerate(request_data.get('photos', [])):
+                logger.info(f"Фото {i+1}: {photo}")
+                if 'file_path' not in photo:
+                    logger.warning(f"Фото {i+1} не содержит поле file_path: {photo}")
+            
             request_message = await send_request_card(
                 bot=bot,
                 chat_id=admin_id,
@@ -1040,12 +1076,6 @@ async def handle_approve_request(callback: CallbackQuery, state: FSMContext, bot
             # Просто убираем клавиатуру, если не удалось отредактировать текст
             await callback.message.edit_reply_markup(reply_markup=None)
         
-        # Отправляем уведомление админу об успешном одобрении
-        await bot.send_message(
-            chat_id=callback.from_user.id,
-            text=f"✅ Заявка #{request_id} успешно одобрена!"
-        )
-        
     except Exception as e:
         logger.error(f"Ошибка при одобрении заявки {request_id}: {e}")
         await callback.message.answer(f"Произошла ошибка при одобрении заявки: {str(e)}")
@@ -1095,8 +1125,6 @@ async def cancel_rejection(callback: CallbackQuery, state: FSMContext):
     
     # Очищаем состояние ожидания причины отклонения
     await state.clear()
-    
-    await callback.message.answer("Отклонение заявки отменено")
 
 # Обработчик для получения причины отклонения заявки
 @router.message(AdminStates.waiting_request_rejection_reason)

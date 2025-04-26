@@ -18,7 +18,6 @@ __all__ = [
     'init_db', 
     'get_db_session', 
     'DBService',
-    's3_service',
     'local_storage_service',
     'admin_chat_service'
 ]

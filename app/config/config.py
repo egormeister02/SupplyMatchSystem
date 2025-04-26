@@ -1,5 +1,5 @@
 from typing import Optional, Any
-import logging
+from app.config.logging import app_logger
 import os
 
 # Переменные конфигурации
@@ -8,7 +8,7 @@ if ADMIN_GROUP_CHAT_ID and ADMIN_GROUP_CHAT_ID.strip():
     try:
         ADMIN_GROUP_CHAT_ID = int(ADMIN_GROUP_CHAT_ID)
     except ValueError:
-        logging.error(f"Некорректный ADMIN_GROUP_CHAT_ID: {ADMIN_GROUP_CHAT_ID}")
+        app_logger.error(f"Некорректный ADMIN_GROUP_CHAT_ID: {ADMIN_GROUP_CHAT_ID}")
         ADMIN_GROUP_CHAT_ID = None
 else:
     ADMIN_GROUP_CHAT_ID = None
@@ -36,14 +36,14 @@ def update_admin_chat_id(new_chat_id: int) -> bool:
     
     if new_chat_id and isinstance(new_chat_id, int):
         ADMIN_GROUP_CHAT_ID = new_chat_id
-        logging.info(f"ID чата администраторов обновлен на {new_chat_id}")
+        app_logger.info(f"ID чата администраторов обновлен на {new_chat_id}")
         return True
     else:
-        logging.error(f"Некорректный ID чата: {new_chat_id}")
+        app_logger.error(f"Некорректный ID чата: {new_chat_id}")
         return False
 
 # Логируем информацию о настройках чата при запуске
 if ADMIN_GROUP_CHAT_ID:
-    logging.info(f"Настроен ID чата администраторов: {ADMIN_GROUP_CHAT_ID}")
+    app_logger.info(f"Настроен ID чата администраторов: {ADMIN_GROUP_CHAT_ID}")
 else:
-    logging.warning("ID чата администраторов не настроен. Используйте команду /chatid в нужном чате для получения ID") 
+    app_logger.warning("ID чата администраторов не настроен. Используйте команду /chatid в нужном чате для получения ID") 

@@ -10,7 +10,7 @@ from app.keyboards.inline import (
     get_back_button,
 )
 
-from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates
 from app.services import get_db_session, DBService
 import logging
 
@@ -433,7 +433,7 @@ request_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Использовать из профиля", callback_data="use_profile_email")],
-                [InlineKeyboardButton(text="Пропустить", callback_data="skip_email")],
+                [InlineKeyboardButton(text="Пропустить", callback_data="request_skip_email")],
                 [get_back_button("waiting_phone", is_state=True, button_text="Назад к телефону", state_group="RequestCreationStates")]
             ]
         ),
@@ -446,7 +446,7 @@ request_creation_config = {
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Подтвердить", callback_data="confirm_request")],
-                [InlineKeyboardButton(text="Редактировать данные", callback_data="edit_attributes")],
+                [InlineKeyboardButton(text="Редактировать данные", callback_data="request_edit_attributes")],
                 [get_back_button("waiting_email", is_state=True, button_text="Назад к email", state_group="RequestCreationStates")]
             ]
         ),
@@ -458,7 +458,7 @@ request_creation_config = {
         "text": "Выберите, что вы хотите отредактировать (введите номер):",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Назад к подтверждению", callback_data="back_to_confirm")]
+                [InlineKeyboardButton(text="Назад к подтверждению", callback_data="request_back_to_confirm")]
             ]
         ),
         "back_state": RequestCreationStates.confirm_request_creation,
@@ -469,6 +469,83 @@ request_creation_config = {
             {"name": "contact_username", "display": "Telegram контакт", "state": RequestCreationStates.waiting_tg_username},
             {"name": "contact_phone", "display": "Телефон", "state": RequestCreationStates.waiting_phone},
             {"name": "contact_email", "display": "Email", "state": RequestCreationStates.waiting_email}
+        ]
+    }
+}
+
+# Конфигурация для состояний "Мои поставщики"
+my_supplier_config = {
+    # Состояние просмотра моих поставщиков
+    MySupplierStates.viewing_suppliers: {
+        "text": "Мои поставщики:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="◀️", callback_data="prev_my_supplier"),
+                    InlineKeyboardButton(text="1/1", callback_data="current_my_supplier"),
+                    InlineKeyboardButton(text="▶️", callback_data="next_my_supplier")
+                ],
+                [get_back_button("suppliers", is_state=False, button_text="Назад к меню поставщиков")]
+            ]
+        ),
+    },
+    
+    # Состояние подтверждения удаления
+    MySupplierStates.confirm_delete: {
+        "text": "Вы уверены, что хотите удалить этого поставщика? Это действие невозможно отменить.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, удалить", callback_data="confirm_delete"),
+                    InlineKeyboardButton(text="❌ Нет, отмена", callback_data="cancel_delete")
+                ]
+            ]
+        ),
+        "back_state": MySupplierStates.viewing_suppliers,
+    },
+    
+    # Состояние подтверждения повторной отправки
+    MySupplierStates.confirm_reapply: {
+        "text": "Вы собираетесь отправить поставщика на повторную проверку. Подтверждаете?",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, отправить", callback_data="confirm_reapply"),
+                    InlineKeyboardButton(text="❌ Нет, отмена", callback_data="cancel_reapply")
+                ]
+            ]
+        ),
+        "back_state": MySupplierStates.viewing_suppliers,
+    },
+    
+    # Состояние редактирования поставщика
+    MySupplierStates.editing_supplier: {
+        "text": "Редактирование поставщика",
+        "markup": get_back_keyboard("viewing_suppliers", is_state=True, button_text="Назад к просмотру", state_group="MySupplierStates"),
+        "back_state": MySupplierStates.viewing_suppliers,
+    },
+    
+    # Состояние выбора атрибута для редактирования
+    MySupplierStates.selecting_attribute: {
+        "text": "Выберите, что вы хотите отредактировать (введите номер):",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Завершить редактирование", callback_data="finish_editing")]
+            ]
+        ),
+        "back_state": MySupplierStates.viewing_suppliers,
+        "attributes": [
+            {"name": "company_name", "display": "Название компании", "state": SupplierCreationStates.waiting_company_name},
+            {"name": "main_category", "display": "Категория и подкатегория", "state": SupplierCreationStates.waiting_main_category},
+            {"name": "product_name", "display": "Название продукта/услуги", "state": SupplierCreationStates.waiting_product_name},
+            {"name": "description", "display": "Описание", "state": SupplierCreationStates.waiting_description},
+            {"name": "country", "display": "Страна", "state": SupplierCreationStates.waiting_country},
+            {"name": "region", "display": "Регион", "state": SupplierCreationStates.waiting_region},
+            {"name": "city", "display": "Город", "state": SupplierCreationStates.waiting_city},
+            {"name": "address", "display": "Адрес", "state": SupplierCreationStates.waiting_address},
+            {"name": "contact_username", "display": "Telegram контакт", "state": SupplierCreationStates.waiting_tg_username},
+            {"name": "contact_phone", "display": "Телефон", "state": SupplierCreationStates.waiting_phone},
+            {"name": "contact_email", "display": "Email", "state": SupplierCreationStates.waiting_email}
         ]
     }
 }
@@ -494,6 +571,8 @@ def get_state_config(state):
         config = supplier_search_config[state]
     elif state in request_creation_config:
         config = request_creation_config[state]
+    elif state in my_supplier_config:
+        config = my_supplier_config[state]
         
     return config
 

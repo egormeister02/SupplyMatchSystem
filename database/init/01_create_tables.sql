@@ -61,8 +61,10 @@ CREATE TABLE requests (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
     rejection_reason TEXT,
+    verified_by_id BIGINT,
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
-    FOREIGN KEY (category_id) REFERENCES categories(id)
+    FOREIGN KEY (category_id) REFERENCES categories(id),
+    FOREIGN KEY (verified_by_id) REFERENCES users(tg_id)
 );
 
 -- Create files table

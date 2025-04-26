@@ -282,7 +282,7 @@ class DBService:
                     s.id, s.company_name, s.product_name, s.category_id, 
                     s.description, s.country, s.region, s.city, s.address,
                     s.contact_username, s.contact_phone, s.contact_email,
-                    s.created_at, s.status, s.created_by_id, s.tarrif, s.verified_by_id,
+                    s.created_at, s.status, s.rejection_reason, s.created_by_id, s.tarrif, s.verified_by_id,
                     c.name as category_name, mc.name as main_category_name
                 FROM suppliers s
                 LEFT JOIN categories c ON s.category_id = c.id
@@ -623,7 +623,7 @@ class DBService:
                     result = await conn.execute(text(query), params)
                 else:
                     result = await conn.execute(text(query))
-                return [dict(row) for row in result]
+                return [dict(row) for row in result.mappings()]
         except Exception as e:
             logger.error(f"Error executing query: {query[:100]}...")
             logger.error(f"Error details: {str(e)}")

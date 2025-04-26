@@ -821,9 +821,12 @@ async def show_supplier_confirmation(message: Message, state: FSMContext, bot: B
     """Показывает информацию для подтверждения создания поставщика"""
     # Получаем данные из состояния
     state_data = await state.get_data()
+    is_edit_mode = state_data.get("is_edit_mode", False)
     
     # Создаем текст подтверждения
-    confirmation_text = "Пожалуйста, проверьте введенные данные о поставщике:\n\n"
+    confirmation_title = "Редактирование поставщика" if is_edit_mode else "Создание нового поставщика"
+    confirmation_text = f"{confirmation_title}\n\n"
+    confirmation_text += "Пожалуйста, проверьте введенные данные о поставщике:\n\n"
     confirmation_text += f"Компания: {state_data.get('company_name', '')}\n"
     confirmation_text += f"Категория: {state_data.get('main_category', '')}\n"
     confirmation_text += f"Подкатегория: {state_data.get('subcategory_name', '')}\n"
@@ -859,19 +862,37 @@ async def show_supplier_confirmation(message: Message, state: FSMContext, bot: B
     # Получаем конфигурацию для состояния подтверждения
     confirm_config = get_state_config(SupplierCreationStates.confirm_supplier_creation)
     
+    # Получаем клавиатуру, возможно модифицированную для режима редактирования
+    keyboard = confirm_config.get("markup")
+    if is_edit_mode:
+        # Изменяем текст кнопки подтверждения для режима редактирования
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить изменения", callback_data="confirm")],
+            [InlineKeyboardButton(text="✏️ Редактировать данные", callback_data="edit_attributes")],
+            # Добавляем кнопку возврата в "Мои поставщики" если редактирование начато оттуда
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+        ])
+    
     # Устанавливаем состояние подтверждения
     await state.set_state(SupplierCreationStates.confirm_supplier_creation)
     
     # Отправляем сообщение с подтверждением
     if is_edit:
-        await message.edit_text(
-            confirmation_text,
-            reply_markup=confirm_config.get("markup")
-        )
+        try:
+            await message.edit_text(
+                confirmation_text,
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            app_logger.error(f"Ошибка при редактировании сообщения: {e}")
+            await message.answer(
+                confirmation_text,
+                reply_markup=keyboard
+            )
     else:
         await message.answer(
             confirmation_text,
-            reply_markup=confirm_config.get("markup")
+            reply_markup=keyboard
         )
 
 @router.callback_query(SupplierCreationStates.confirm_supplier_creation, F.data == "edit_attributes")
@@ -986,20 +1007,71 @@ async def back_to_attribute_list(callback: CallbackQuery, state: FSMContext, bot
         reply_markup=edit_config.get("markup")
     )
 
+# Обработчик для отмены редактирования
+@router.callback_query(SupplierCreationStates.confirm_supplier_creation, F.data == "cancel_edit")
+async def cancel_edit(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Отмена редактирования и возврат в предыдущее меню"""
+    await callback.answer()
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    from_my_suppliers = state_data.get("from_my_suppliers", False)
+    
+    # Удаляем клавиатуру у текущего сообщения
+    await remove_keyboard_from_context(bot, callback)
+    
+    if from_my_suppliers:
+        # Возвращаемся в меню "Мои поставщики"
+        await callback.message.answer("Редактирование отменено. Возвращаемся к списку ваших поставщиков...")
+        
+        # Очищаем состояние
+        await state.clear()
+        
+        # Вызываем вспомогательную функцию напрямую
+        from app.handlers.my_suppliers import show_user_suppliers
+        await show_user_suppliers(
+            user_id=callback.from_user.id,
+            chat_id=callback.message.chat.id,
+            state=state,
+            bot=bot
+        )
+    else:
+        # Возвращаемся в основное меню поставщиков
+        await callback.message.answer("Редактирование отменено.")
+        
+        # Очищаем состояние
+        await state.clear()
+        
+        # Возвращаемся в меню поставщиков
+        from app.config.action_config import get_action_config
+        action_config = get_action_config("suppliers")
+        
+        await callback.message.answer(
+            action_config.get("text", "Меню поставщиков:"),
+            reply_markup=action_config.get("markup")
+        )
+
 # Обновляем функцию сохранения поставщика
 @router.callback_query(SupplierCreationStates.confirm_supplier_creation, F.data == "confirm")
 async def confirm_supplier_creation(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Подтверждение создания поставщика"""
+    """Подтверждение создания или обновления поставщика"""
     await callback.answer()
     
     # Получаем все данные из состояния
     state_data = await state.get_data()
-    app_logger.info("=== Подтверждение создания поставщика ===")
+    app_logger.info("=== Подтверждение создания/обновления поставщика ===")
     app_logger.info(f"ID пользователя: {callback.from_user.id}")
+    
+    # Проверяем, находимся ли мы в режиме редактирования
+    is_edit_mode = state_data.get("is_edit_mode", False)
+    from_my_suppliers = state_data.get("from_my_suppliers", False)
     
     try:
         # Сохраняем поставщика в базу данных
-        app_logger.info("Начинаю процесс сохранения поставщика в БД")
+        if is_edit_mode:
+            app_logger.info("Начинаю процесс обновления поставщика в БД")
+        else:
+            app_logger.info("Начинаю процесс сохранения поставщика в БД")
         
         async with get_db_session() as session:
             db_service = DBService(session)
@@ -1022,79 +1094,166 @@ async def confirm_supplier_creation(callback: CallbackQuery, state: FSMContext, 
                 await state.update_data(photos=photos)
                 state_data = await state.get_data()
             
-            supplier_id = await db_service.save_supplier(
-                company_name=state_data.get("company_name"),
-                product_name=state_data.get("product_name"),
-                category_id=state_data.get("category_id"),
-                description=state_data.get("description"),
-                country=state_data.get("country"),
-                region=state_data.get("region"),
-                city=state_data.get("city"),
-                address=state_data.get("address"),
-                contact_username=state_data.get("contact_username"),
-                contact_phone=state_data.get("contact_phone"),
-                contact_email=state_data.get("contact_email"),
-                created_by_id=state_data.get("user_id"),
-                photos=state_data.get("photos", []),
-                video=state_data.get("video")
-            )
-            
-            app_logger.info(f"Поставщик успешно создан с ID: {supplier_id}")
-            
-            if not supplier_id:
-                app_logger.error("Не удалось получить ID поставщика после создания")
-                raise Exception("Ошибка при сохранении поставщика")
-            
-            # Создаем набор данных для отправки в чат администраторов
-            supplier_data = {
-                "company_name": state_data.get("company_name", ""),
-                "product_name": state_data.get("product_name", ""),
-                "category_name": state_data.get("main_category", ""),
-                "subcategory_name": state_data.get("subcategory_name", ""),
-                "description": state_data.get("description", "Не указано"),
-                "photos": state_data.get("photos", [])
-            }
-            
-            # Отправляем уведомление в чат администраторов
-            try:
-                # Отправляем карточку поставщика с кнопкой "Забрать себе"
-                result = await admin_chat_service.send_supplier_to_admin_chat(
-                    bot=bot,
+            if is_edit_mode:
+                # Обновляем существующего поставщика
+                supplier_id = state_data.get("supplier_id")
+                
+                if not supplier_id:
+                    app_logger.error("Не найден ID поставщика для обновления")
+                    raise Exception("Ошибка при обновлении поставщика: ID не найден")
+                
+                # Получаем текущие данные поставщика перед обновлением, чтобы убедиться, что медиафайлы не потеряются
+                current_supplier = await db_service.get_supplier_by_id(supplier_id)
+                
+                # Проверяем переданные фото, если фото не были изменены, используем существующие
+                photos_to_update = state_data.get("photos", [])
+                if not photos_to_update and current_supplier:
+                    photos_to_update = current_supplier.get("photos", [])
+                    app_logger.info(f"Используем существующие фото: {len(photos_to_update)} шт.")
+                
+                # Проверяем переданное видео, если видео не было изменено, используем существующее
+                video_to_update = state_data.get("video")
+                if not video_to_update and current_supplier:
+                    video_to_update = current_supplier.get("video")
+                    app_logger.info("Используем существующее видео")
+                
+                success = await db_service.update_supplier(
                     supplier_id=supplier_id,
-                    supplier_data=supplier_data
+                    company_name=state_data.get("company_name"),
+                    product_name=state_data.get("product_name"),
+                    category_id=state_data.get("category_id"),
+                    description=state_data.get("description"),
+                    country=state_data.get("country"),
+                    region=state_data.get("region"),
+                    city=state_data.get("city"),
+                    address=state_data.get("address"),
+                    contact_username=state_data.get("contact_username"),
+                    contact_phone=state_data.get("contact_phone"),
+                    contact_email=state_data.get("contact_email"),
+                    photos=photos_to_update,
+                    video=video_to_update
                 )
                 
-                if result:
-                    app_logger.info(f"Уведомление о новом поставщике отправлено в чат администраторов")
+                if success:
+                    app_logger.info(f"Поставщик успешно обновлен, ID: {supplier_id}")
+                    
+                    # ВАЖНО: Больше не отправляем поставщика на повторную проверку автоматически
+                    # Повторная отправка должна выполняться через отдельную кнопку
+                    
+                    # Получаем статус поставщика для уведомления пользователя
+                    supplier_status = state_data.get("status")
+                    if supplier_status == "rejected":
+                        # Сообщаем пользователю, что поставщик отклонен и нужно его отправить повторно отдельным действием
+                        app_logger.info(f"Поставщик ID:{supplier_id} обновлен, но требуется явная повторная отправка на проверку")
                 else:
-                    app_logger.warning("Не удалось отправить уведомление в чат администраторов")
+                    app_logger.error(f"Не удалось обновить поставщика ID: {supplier_id}")
+                    raise Exception("Ошибка при обновлении поставщика")
+            else:
+                # Создаем нового поставщика
+                supplier_id = await db_service.save_supplier(
+                    company_name=state_data.get("company_name"),
+                    product_name=state_data.get("product_name"),
+                    category_id=state_data.get("category_id"),
+                    description=state_data.get("description"),
+                    country=state_data.get("country"),
+                    region=state_data.get("region"),
+                    city=state_data.get("city"),
+                    address=state_data.get("address"),
+                    contact_username=state_data.get("contact_username"),
+                    contact_phone=state_data.get("contact_phone"),
+                    contact_email=state_data.get("contact_email"),
+                    created_by_id=state_data.get("user_id"),
+                    photos=state_data.get("photos", []),
+                    video=state_data.get("video")
+                )
                 
-            except Exception as e:
-                app_logger.error(f"Ошибка при отправке уведомления в чат администраторов: {str(e)}")
+                app_logger.info(f"Поставщик успешно создан с ID: {supplier_id}")
+                
+                if not supplier_id:
+                    app_logger.error("Не удалось получить ID поставщика после создания")
+                    raise Exception("Ошибка при сохранении поставщика")
+                
+                # Создаем набор данных для отправки в чат администраторов
+                supplier_data = {
+                    "company_name": state_data.get("company_name", ""),
+                    "product_name": state_data.get("product_name", ""),
+                    "category_name": state_data.get("main_category", ""),
+                    "subcategory_name": state_data.get("subcategory_name", ""),
+                    "description": state_data.get("description", "Не указано"),
+                    "photos": state_data.get("photos", [])
+                }
+                
+                # Отправляем уведомление в чат администраторов
+                try:
+                    # Отправляем карточку поставщика с кнопкой "Забрать себе"
+                    result = await admin_chat_service.send_supplier_to_admin_chat(
+                        bot=bot,
+                        supplier_id=supplier_id,
+                        supplier_data=supplier_data
+                    )
+                    
+                    if result:
+                        app_logger.info(f"Уведомление о новом поставщике отправлено в чат администраторов")
+                    else:
+                        app_logger.warning("Не удалось отправить уведомление в чат администраторов")
+                    
+                except Exception as e:
+                    app_logger.error(f"Ошибка при отправке уведомления в чат администраторов: {str(e)}")
             
             # Удаляем клавиатуру у текущего сообщения
             await remove_keyboard_from_context(bot, callback)
             
-            # Формируем сообщение об успешном создании
-            success_message = f"Поставщик успешно создан! Данные будут проверены администратором.\n"
-            await callback.message.answer(success_message)
+            # Формируем сообщение об успешном создании/обновлении
+            if is_edit_mode:
+                success_message = f"Поставщик успешно отредактирован! "
+                supplier_status = state_data.get("status")
+                if supplier_status == "rejected":
+                    success_message += "Обратите внимание: поставщик был ранее отклонен администратором. " + \
+                                      "После возврата к списку поставщиков, вы можете отправить его на повторную " + \
+                                      "проверку, нажав соответствующую кнопку."
+            else:
+                success_message = f"Поставщик успешно создан! Данные будут проверены администратором.\n"
+                
+            # Определяем, куда вернуться после завершения
+            if from_my_suppliers:
+                # Возвращаемся в меню "Мои поставщики"
+                await callback.message.answer(f"{success_message} Возвращаемся к списку ваших поставщиков...")
+                
+                # Очищаем состояние перед вызовом
+                await state.clear()
+                
+                # Вызываем вспомогательную функцию напрямую
+                from app.handlers.my_suppliers import show_user_suppliers
+                await show_user_suppliers(
+                    user_id=callback.from_user.id,
+                    chat_id=callback.message.chat.id,
+                    state=state,
+                    bot=bot
+                )
+            else:
+                # Возвращаемся в меню поставщиков
+                await callback.message.answer(success_message)
+                
+                from app.config.action_config import get_action_config
+                action_config = get_action_config("suppliers")
+                
+                await callback.message.answer(
+                    action_config.get("text", "Меню поставщиков:"),
+                    reply_markup=action_config.get("markup")
+                )
+                
+                # Очищаем состояние
+                await state.clear()
             
-            # Возвращаемся в меню поставщиков
-            from app.config.action_config import get_action_config
-            action_config = get_action_config("suppliers")
-            
-            await callback.message.answer(
-                action_config.get("text", "Меню поставщиков:"),
-                reply_markup=action_config.get("markup")
-            )
-            
-            # Очищаем состояние
-            await state.clear()
-            app_logger.info("=== Создание поставщика успешно завершено ===")
+            if is_edit_mode:
+                app_logger.info("=== Обновление поставщика успешно завершено ===")
+            else:
+                app_logger.info("=== Создание поставщика успешно завершено ===")
             
     except Exception as e:
         # Логируем ошибку
-        app_logger.error(f"=== ОШИБКА при создании поставщика: {str(e)} ===")
+        action = "редактирования" if is_edit_mode else "создания"
+        app_logger.error(f"=== ОШИБКА при {action} поставщика: {str(e)} ===")
         app_logger.error(f"Тип ошибки: {type(e).__name__}")
         import traceback
         app_logger.error(f"Стек вызовов: {traceback.format_exc()}")
@@ -1104,8 +1263,8 @@ async def confirm_supplier_creation(callback: CallbackQuery, state: FSMContext, 
         
         # Сообщаем пользователю об ошибке
         await callback.message.answer(
-            "К сожалению, произошла ошибка при создании поставщика. Пожалуйста, попробуйте позже."
-    )
+            f"К сожалению, произошла ошибка при {action} поставщика. Пожалуйста, попробуйте позже."
+        )
 
 def register_handlers(dp):
     dp.include_router(router) 

@@ -2,7 +2,6 @@
 File upload and download handlers
 """
 
-import logging
 import os
 from typing import Optional
 
@@ -12,6 +11,7 @@ from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import local_storage_service, get_db_session, DBService
+from app.config.logging import app_logger
 
 # Router initialization
 router = Router()
@@ -47,7 +47,7 @@ async def handle_document(message: Message, bot: Bot):
         await message.answer(f"Файл '{file_name}' успешно загружен!")
         
     except Exception as e:
-        logging.error(f"Error processing file: {str(e)}")
+        app_logger.error(f"Error processing file: {str(e)}")
         await message.answer("Произошла ошибка при обработке файла. Попробуйте позже.")
 
 @router.message(Command("getfile"))
@@ -86,7 +86,7 @@ async def get_file_command(message: Message, bot: Bot):
     except ValueError:
         await message.answer("ID файла должен быть числом.")
     except Exception as e:
-        logging.error(f"Error retrieving file: {str(e)}")
+        app_logger.error(f"Error retrieving file: {str(e)}")
         await message.answer("Произошла ошибка при получении файла.")
 
 async def save_file_to_db(db_service: DBService, file_path: str, file_name: str, message: Message) -> Optional[int]:
@@ -121,7 +121,7 @@ async def save_file_to_db(db_service: DBService, file_path: str, file_name: str,
     except Exception as e:
         await db_service.rollback()
         await local_storage_service.delete_file(file_path)
-        logging.error(f"Error saving file to database: {str(e)}")
+        app_logger.error(f"Error saving file to database: {str(e)}")
         return None
 
 async def get_file_from_db(db_service: DBService, file_id: int) -> Optional[dict]:
@@ -155,5 +155,9 @@ async def get_file_from_db(db_service: DBService, file_id: int) -> Optional[dict
             "uploaded_at": file_row[4]
         }
     except Exception as e:
-        logging.error(f"Error retrieving file from database: {str(e)}")
-        return None 
+        app_logger.error(f"Error retrieving file from database: {str(e)}")
+        return None
+
+def register_handlers(dp):
+    """Register file handlers with dispatcher"""
+    dp.include_router(router) 

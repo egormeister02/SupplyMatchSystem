@@ -1,9 +1,9 @@
 import os
 import shutil
-import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
+from app.config.logging import app_logger
 
 class LocalStorageService:
     """Local file storage service"""
@@ -17,13 +17,13 @@ class LocalStorageService:
         """
         self.storage_path = storage_path
         self._ensure_storage_exists()
-        logging.info(f"Local storage initialized. Path: {self.storage_path}")
+        app_logger.info(f"Local storage initialized. Path: {self.storage_path}")
     
     def _ensure_storage_exists(self):
         """Check and create storage directory if it doesn't exist"""
         if not os.path.exists(self.storage_path):
             os.makedirs(self.storage_path, exist_ok=True)
-            logging.info(f"Created storage directory: {self.storage_path}")
+            app_logger.info(f"Created storage directory: {self.storage_path}")
     
     def _generate_file_path(self, file_name):
         """
@@ -72,10 +72,10 @@ class LocalStorageService:
         # Copy file to storage
         try:
             shutil.copy2(file_path, storage_full_path)
-            logging.info(f"File saved: {storage_relative_path}")
+            app_logger.info(f"File saved: {storage_relative_path}")
             return storage_relative_path
         except Exception as e:
-            logging.error(f"Error saving file: {str(e)}")
+            app_logger.error(f"Error saving file: {str(e)}")
             raise
     
     async def get_file_path(self, file_path):
@@ -90,7 +90,7 @@ class LocalStorageService:
         """
         full_path = os.path.join(self.storage_path, file_path)
         if not os.path.exists(full_path):
-            logging.error(f"File not found: {full_path}")
+            app_logger.error(f"File not found: {full_path}")
             return None
         return full_path
     
@@ -108,13 +108,13 @@ class LocalStorageService:
         try:
             if os.path.exists(full_path):
                 os.remove(full_path)
-                logging.info(f"File deleted: {file_path}")
+                app_logger.info(f"File deleted: {file_path}")
                 return True
             else:
-                logging.warning(f"File not found for deletion: {file_path}")
+                app_logger.warning(f"File not found for deletion: {file_path}")
                 return False
         except Exception as e:
-            logging.error(f"Error deleting file: {str(e)}")
+            app_logger.error(f"Error deleting file: {str(e)}")
             return False
 
 # Create service instance

@@ -408,52 +408,53 @@ class AdminChatService:
 
     async def send_request_to_admin_chat(self, bot: Bot, request_id: int, request_data: Dict[str, Any], **kwargs) -> bool:
         """
-        Отправляет карточку заявки в чат администраторов с кнопкой "Забрать себе"
-        
-        :param bot: Экземпляр бота для отправки сообщения
-        :param request_id: ID заявки
-        :param request_data: Данные заявки
-        :param kwargs: Дополнительные параметры для обратной совместимости
-        :return: True если сообщение отправлено успешно, False иначе
+        Отправляет карточку заявки в чат администраторов
         """
-        # Проверяем настройку ID чата администраторов
-        if not self.admin_chat_id:
-            logger.error("ID чата администраторов (ADMIN_GROUP_CHAT_ID) не настроен в конфигурации!")
-            logger.error("Используйте команду /chatid в нужном чате для получения ID")
-            return False
-        
-        # Логируем информацию о попытке отправки сообщения
-        logger.info(f"Попытка отправки сообщения о заявке {request_id} в чат {self.admin_chat_id}")
-        
         try:
-            # Формируем текст сообщения с основной информацией о заявке
-            category = request_data.get('category_name', "")
-            main_category = request_data.get('main_category_name', "")
-            description = request_data.get('description', 'Описание отсутствует')
-            photos = request_data.get('photos', [])
+            if not self.admin_chat_id:
+                logger.error("Идентификатор чата администраторов не задан")
+                return False
             
-            message_text = (
-                f"📋 НОВАЯ ЗАЯВКА #{request_id}\n\n"
-                f"🔍 Категория: {main_category}\n"
-                f"🔍 Подкатегория: {category}\n"
-                f"📝 Описание: {description[:200]}{'...' if len(description) > 200 else ''}"
-            )
+            # Получаем категорию заявки
+            category_id = request_data.get("category_id")
+            category_name = request_data.get("category_name", "Не указана")
             
-            # Инициализируем переменную для пути к фото
-            photo_path = None
-            
-            # Берем первую фотографию только если список не пуст
-            if photos and len(photos) > 0:
-                first_photo = photos[0]
-                
-                # Определяем путь к фотографии в зависимости от формата данных
-                if isinstance(first_photo, dict):
-                    if 'storage_path' in first_photo:
-                        photo_path = first_photo['storage_path']
-                    elif 'file_path' in first_photo:
-                        photo_path = first_photo['file_path']
+            # Получаем дату создания заявки
+            created_at = request_data.get("created_at")
+            created_at_str = ""
+            if created_at:
+                if isinstance(created_at, str):
+                    try:
+                        from datetime import datetime
+                        created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        created_at_str = created_at_dt.strftime('%d.%m.%Y %H:%M')
+                    except:
+                        created_at_str = created_at
                 else:
-                    photo_path = first_photo
+                    created_at_str = str(created_at)
+            
+            # Формируем текст сообщения с описанием заявки
+            message_text = f"📝 <b>Новая заявка #{request_id}</b>\n\n"
+            
+            message_text += f"<b>Категория:</b> {category_name}\n\n"
+            
+            # Добавляем описание, если есть
+            description = request_data.get("description", "").strip()
+            if description:
+                message_text += f"<b>Описание:</b>\n{description}\n\n"
+            
+            # Добавляем контактную информацию
+            contact_info = request_data.get("contact_info", "").strip()
+            if contact_info:
+                message_text += f"<b>Контакты:</b>\n{contact_info}\n\n"
+            
+            # Добавляем дату создания
+            if created_at_str:
+                message_text += f"<b>Создано:</b> {created_at_str}\n"
+            
+            # Получаем медиа-файлы заявки
+            photos = request_data.get("photos", [])
+            video = request_data.get("video")
             
             # Создаем клавиатуру с кнопкой "Забрать себе"
             keyboard = InlineKeyboardMarkup(
@@ -469,64 +470,50 @@ class AdminChatService:
                     ]
                 ]
             )
-            
-            # Пытаемся получить полный путь к файлу фотографии, если она есть
-            input_photo = None
-            if photo_path:
-                try:
-                    # Если путь является существующим файлом, используем его
-                    if os.path.exists(str(photo_path)):
-                        input_photo = FSInputFile(photo_path)
-                    else:
-                        # Пробуем получить полный путь через сервис хранения
-                        full_path = await local_storage_service.get_file_path(str(photo_path))
-                        if full_path and os.path.exists(full_path):
-                            input_photo = FSInputFile(full_path)
-                        else:
-                            # Если не найден полный путь, пытаемся использовать как URL
-                            input_photo = photo_path
-                except Exception as e:
-                    logger.error(f"Ошибка при подготовке фото: {e}")
-                    input_photo = None
-            
-            # Отправляем сообщение с фото или без в зависимости от наличия фото
+
             try:
-                if input_photo:
-                    message = await bot.send_photo(
-                        chat_id=self.admin_chat_id,
-                        photo=input_photo,
-                        caption=message_text,
-                        reply_markup=keyboard
-                    )
-                else:
-                    message = await bot.send_message(
-                        chat_id=self.admin_chat_id,
-                        text=message_text,
-                        reply_markup=keyboard
-                    )
+                # Если есть фото, отправляем его с текстом
+                if photos and len(photos) > 0:
+                    # Пробуем получить путь к первому фото
+                    photo_path = None
+                    first_photo = photos[0]
+                    
+                    if isinstance(first_photo, dict):
+                        if 'file_path' in first_photo:
+                            photo_path = first_photo['file_path']
+                        elif 'storage_path' in first_photo:
+                            photo_path = first_photo['storage_path']
+                    
+                    if photo_path:
+                        try:
+                            full_path = await local_storage_service.get_file_path(str(photo_path))
+                            if full_path and os.path.exists(full_path):
+                                await bot.send_photo(
+                                    chat_id=self.admin_chat_id,
+                                    photo=FSInputFile(full_path),
+                                    caption=message_text,
+                                    reply_markup=keyboard,
+                                    parse_mode="HTML"
+                                )
+                                logger.info(f"Отправлено сообщение с фото о заявке {request_id}")
+                                return True
+                        except Exception as photo_error:
+                            logger.error(f"Ошибка при отправке сообщения с фото: {photo_error}")
+                            # Продолжаем и попробуем отправить только текст
                 
-                logger.info(f"Отправлено сообщение о новой заявке {request_id} в чат администраторов")
+                # Если не удалось отправить фото или его нет, отправляем только текст
+                await bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=message_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+                logger.info(f"Отправлено текстовое сообщение о заявке {request_id}")
                 return True
+            except Exception as text_error:
+                logger.error(f"Не удалось отправить текстовое сообщение: {text_error}")
+                return False
                 
-            except Exception as send_error:
-                logger.error(f"Ошибка при отправке сообщения: {send_error}")
-                
-                # Пробуем отправить только текст, если отправка с фото не удалась
-                if input_photo:
-                    try:
-                        await bot.send_message(
-                            chat_id=self.admin_chat_id,
-                            text=message_text,
-                            reply_markup=keyboard
-                        )
-                        logger.info(f"Отправлено текстовое сообщение о заявке {request_id} (без фото)")
-                        return True
-                    except Exception as text_error:
-                        logger.error(f"Не удалось отправить текстовое сообщение: {text_error}")
-                        return False
-                else:
-                    return False
-            
         except Exception as e:
             logger.error(f"Ошибка при отправке карточки заявки в чат администраторов: {e}")
             return False

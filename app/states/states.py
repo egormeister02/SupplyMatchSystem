@@ -59,4 +59,6 @@ class MySupplierStates(StatesGroup):
     viewing_suppliers = State()    # Просмотр поставщиков пользователя
     confirm_delete = State()       # Подтверждение удаления поставщика
     confirm_reapply = State()      # Подтверждение повторной отправки на проверку
+    editing_supplier = State()     # Редактирование поставщика
+    selecting_attribute = State()  # Выбор атрибута для редактирования
 

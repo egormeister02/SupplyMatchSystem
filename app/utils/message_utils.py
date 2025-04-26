@@ -562,15 +562,33 @@ async def send_request_card(
     
     # Получаем пути ко всем фотографиям
     photo_paths = []
-    for photo in photos:
+    logging.info(f"Начинаю обработку фотографий для заявки {request.get('id')}")
+    for i, photo in enumerate(photos):
+        logging.info(f"Обработка фото {i+1}: {photo}")
+        if not isinstance(photo, dict):
+            logging.error(f"Фото {i+1} имеет неверный формат: {photo}")
+            continue
+        
         relative_path = photo.get('file_path')
-        if relative_path:
-            try:
-                full_path = await local_storage_service.get_file_path(relative_path)
-                if full_path and os.path.exists(full_path):
-                    photo_paths.append(full_path)
-            except Exception as e:
-                logging.error(f"Ошибка при получении пути к фото: {e}")
+        if not relative_path:
+            logging.error(f"Фото {i+1} не содержит поле file_path: {photo}")
+            # Пробуем использовать storage_path, если file_path отсутствует
+            relative_path = photo.get('storage_path')
+            if not relative_path:
+                logging.error(f"Фото {i+1} не содержит ни file_path, ни storage_path, пропускаем")
+                continue
+            logging.info(f"Используем storage_path вместо file_path: {relative_path}")
+        
+        try:
+            full_path = await local_storage_service.get_file_path(relative_path)
+            logging.info(f"Полный путь к фото {i+1}: {full_path}")
+            if full_path and os.path.exists(full_path):
+                photo_paths.append(full_path)
+                logging.info(f"Фото {i+1} успешно добавлено в список для отправки")
+            else:
+                logging.error(f"Файл не существует по пути: {full_path}")
+        except Exception as e:
+            logging.error(f"Ошибка при получении пути к фото {i+1}: {e}")
     
     # Получаем путь к видео, если оно есть
     video_path = None

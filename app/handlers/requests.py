@@ -11,6 +11,7 @@ import os
 import time
 import re
 from pathlib import Path
+from datetime import datetime
 
 from app.services import get_db_session, DBService
 from app.states.states import RequestCreationStates
@@ -652,7 +653,7 @@ async def use_profile_email(callback: CallbackQuery, state: FSMContext, bot: Bot
             "В вашем профиле не найден email. Пожалуйста, введите email вручную или пропустите этот шаг."
         )
 
-@router.callback_query(F.data == "skip_email")
+@router.callback_query(F.data == "request_skip_email")
 async def skip_email(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Пропуск ввода email"""
     await callback.answer()
@@ -698,7 +699,7 @@ async def show_request_confirmation(message: Message, state: FSMContext, bot: Bo
         reply_markup=confirm_config.get("markup")
     )
 
-@router.callback_query(RequestCreationStates.confirm_request_creation, F.data == "edit_attributes")
+@router.callback_query(RequestCreationStates.confirm_request_creation, F.data == "request_edit_attributes")
 async def edit_request_attributes(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработчик кнопки редактирования атрибутов заявки"""
     await callback.answer()
@@ -774,7 +775,7 @@ async def process_attribute_selection(message: Message, state: FSMContext, bot: 
             text,
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Вернуться к списку атрибутов", callback_data="back_to_attributes")]
+                    [InlineKeyboardButton(text="Вернуться к списку атрибутов", callback_data="request_back_to_attributes")]
                 ]
             )
         )
@@ -782,7 +783,7 @@ async def process_attribute_selection(message: Message, state: FSMContext, bot: 
     except ValueError:
         await message.answer("Пожалуйста, введите номер атрибута из списка.")
 
-@router.callback_query(F.data == "back_to_attributes")
+@router.callback_query(F.data == "request_back_to_attributes")
 async def back_to_attribute_list(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработчик кнопки возврата к списку атрибутов"""
     await callback.answer()
@@ -811,7 +812,7 @@ async def back_to_attribute_list(callback: CallbackQuery, state: FSMContext, bot
         reply_markup=edit_config.get("markup")
     )
 
-@router.callback_query(F.data == "back_to_confirm")
+@router.callback_query(F.data == "request_back_to_confirm")
 async def back_to_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработчик кнопки возврата к подтверждению заявки"""
     await callback.answer()
@@ -902,7 +903,7 @@ async def confirm_request_creation(callback: CallbackQuery, state: FSMContext, b
                 for photo in photos:
                     await db_service.save_file(
                         file_path=photo["storage_path"],
-                        file_type="image",
+                        file_type="photo",
                         name=None,
                         request_id=request_id
                     )
@@ -929,8 +930,32 @@ async def confirm_request_creation(callback: CallbackQuery, state: FSMContext, b
                     "contact_username": state_data.get("contact_username", ""),
                     "contact_phone": state_data.get("contact_phone", ""),
                     "contact_email": state_data.get("contact_email", ""),
-                    "photos": photos
+                    "photos": []
                 }
+                
+                # Добавляем текущую дату и время создания
+                admin_request_data["created_at"] = datetime.now().isoformat()
+                
+                # Формируем строку контактной информации
+                contacts = []
+                if state_data.get("contact_username"):
+                    contacts.append(f"Telegram: {state_data.get('contact_username')}")
+                if state_data.get("contact_phone"):
+                    contacts.append(f"Телефон: {state_data.get('contact_phone')}")
+                if state_data.get("contact_email"):
+                    contacts.append(f"Email: {state_data.get('contact_email')}")
+                
+                admin_request_data["contact_info"] = "\n".join(contacts) if contacts else "Контактная информация не указана"
+                
+                # Преобразуем структуру фотографий для корректной передачи
+                if photos:
+                    for photo in photos:
+                        if isinstance(photo, dict) and 'storage_path' in photo:
+                            admin_request_data["photos"].append({
+                                "file_id": photo.get("file_id", ""),
+                                "file_path": photo.get("storage_path", ""),
+                                "storage_path": photo.get("storage_path", "")
+                            })
                 
                 # Отправляем заявку в чат администраторов с помощью нового метода
                 result = await admin_chat_service.send_request_to_admin_chat(
