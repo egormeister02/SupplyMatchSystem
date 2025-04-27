@@ -13,6 +13,7 @@ from app.utils.message_utils import send_request_card, remove_keyboard_from_cont
 from app.services import get_db_session, DBService, admin_chat_service
 from app.utils.message_utils import send_supplier_card
 from app.config import config
+from app.services.notification_queue import notification_queue_service
 
 # Инициализируем роутер
 router = Router()
@@ -920,7 +921,7 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
                 db_service = DBService(session)
                 update_query = """
                     UPDATE requests 
-                    SET verified_by = :admin_id 
+                    SET verified_by_id = :admin_id 
                     WHERE id = :request_id
                 """
                 # Преобразуем request_id в целое число
@@ -1014,71 +1015,143 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
 # Обработчик для кнопки "Подтвердить" в личном чате админа для заявки
 @router.callback_query(F.data.startswith("admin:approve_request"))
 async def handle_approve_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """
-    Обрабатывает подтверждение заявки администратором
-    """
-    await callback.answer()
-    
-    # Парсим данные из callback
+    """Обработчик принятия заявки администратором"""
+    # Извлекаем ID заявки из callback data
     data = admin_chat_service.parse_admin_callback_data(callback.data)
     request_id = data.get("request_id")
     
     if not request_id:
-        await callback.message.answer("Ошибка: ID заявки не указан")
+        await callback.answer("Ошибка: ID заявки не найден", show_alert=True)
         return
     
+    admin_id = callback.from_user.id
+    
+    # Сначала создаем matches для заявки
+    logger.info(f"Создание matches для заявки {request_id}")
     try:
-        # Получаем данные заявки из состояния
-        state_data = await state.get_data()
-        request_data = state_data.get("request_data")
-        
-        # Если данных нет в состоянии, запрашиваем из базы данных
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            # Обновляем статус заявки на approved
+            update_query = """
+                UPDATE requests
+                SET status = 'approved', verified_by_id = :admin_id
+                WHERE id = :request_id
+            """
+            # Преобразуем request_id в целое число, если это строка
+            request_id_int = int(request_id) if isinstance(request_id, str) else request_id
+            
+            await db_service.execute_query(update_query, {
+                "request_id": request_id_int,
+                "admin_id": admin_id
+            })
+            await db_service.commit()
+            logger.info(f"Статус заявки {request_id} обновлен на approved администратором {admin_id}")
+            
+            # Создаем matches напрямую через instance DBService
+            matches = await db_service._create_matches_for_request(request_id_int)
+            supplier_count = len(matches)
+            logger.info(f"Создано {supplier_count} matches для заявки {request_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении статуса заявки {request_id}: {e}")
+        await callback.answer("Произошла ошибка при обработке заявки", show_alert=True)
+        return
+    
+    # Получаем данные о заявке из БД, если не были получены ранее
+    request_data = None
+    try:
+        # Получаем данные о заявке
+        request_data = await DBService.get_request_by_id_static(int(request_id))
         if not request_data:
-            request_data = await DBService.get_request_by_id_static(int(request_id))
-            if not request_data:
-                await callback.message.answer(f"Ошибка: заявка с ID {request_id} не найдена")
-                return
+            await callback.answer(f"Ошибка: заявка с ID {request_id} не найдена", show_alert=True)
+            return
+    except Exception as e:
+        logger.error(f"Ошибка при получении данных заявки {request_id}: {e}")
+        await callback.answer("Произошла ошибка при обработке заявки", show_alert=True)
+        return
         
-        await DBService.update_request_status(int(request_id), "approved")
-        
-        logger.info(f"Заявка {request_id} одобрена администратором {callback.from_user.id}")
-        
-        # Получаем пользователя, создавшего заявку
-        user_id = request_data.get("created_by_id")
-        
-        if user_id:
-            # Отправляем уведомление пользователю о подтверждении
-            try:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=f"✅ Ваша заявка #{request_id} была проверена и одобрена администратором."
-                )
-            except Exception as e:
-                logger.error(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
-        
-        # Обновляем сообщение в личном чате админа
+    # Уведомляем пользователя о том, что его заявка одобрена
+    user_id = request_data.get("created_by_id")
+    
+    if user_id:
         try:
-            # Проверяем тип сообщения - имеет ли оно caption (фото, видео и т.д.) или только текст
-            if hasattr(callback.message, 'caption') and callback.message.caption is not None:
-                # Редактируем caption для медиа-сообщений, удаляя клавиатуру
-                await callback.message.edit_caption(
-                    caption=callback.message.caption + "\n\n✅ Заявка одобрена",
-                    reply_markup=None
+            if supplier_count > 0:
+                notification_text = (
+                    f"✅ Ваша заявка #{request_id} была одобрена администратором!\n\n"
+                    f"Уведомление о вашей заявке отправлено {supplier_count} поставщикам. "
+                    f"Если кто-то из поставщиков заинтересуется вашей заявкой, вы получите уведомление с их контактными данными."
                 )
             else:
-                # Для текстовых сообщений редактируем текст, удаляя клавиатуру
-                await callback.message.edit_text(
-                    text=callback.message.text + "\n\n✅ Заявка одобрена",
-                    reply_markup=None
+                notification_text = (
+                    f"✅ Ваша заявка #{request_id} была одобрена администратором!\n\n"
+                    f"К сожалению, в нашей базе нет подходящих поставщиков в выбранной вами категории. "
+                    f"Мы уведомим вас, как только подходящие поставщики появятся в системе."
                 )
+                
+            await bot.send_message(
+                chat_id=user_id,
+                text=notification_text
+            )
+            logger.info(f"Отправлено уведомление пользователю {user_id} об одобрении заявки {request_id}")
         except Exception as e:
-            logger.warning(f"Не удалось отредактировать сообщение с карточкой: {e}")
-            # Просто убираем клавиатуру, если не удалось отредактировать текст
-            await callback.message.edit_reply_markup(reply_markup=None)
+            logger.error(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
+    
+    # Если найдены matches, отправляем уведомления поставщикам
+    if supplier_count > 0:
+        try:
+            # Отправляем уведомления поставщикам через очередь
+            await notification_queue_service.add_supplier_notifications(
+                bot=bot,
+                request_id=int(request_id),
+                matches=matches,
+                request_data=request_data
+            )
+            logger.info(f"Добавлены уведомления в очередь для {supplier_count} поставщиков по заявке {request_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомлений поставщикам для заявки {request_id}: {e}")
+    
+    # Обновляем сообщение с заявкой, чтобы показать статус approved
+    try:
+        state_data = await state.get_data()
+        keyboard_message_id = state_data.get("keyboard_message_id")
         
+        if keyboard_message_id:
+            approved_keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="↩️ Назад к списку заявок",
+                            callback_data="admin:pending_requests:1"
+                        )
+                    ]
+                ]
+            )
+            
+            # Обновляем текст и клавиатуру сообщения
+            await bot.edit_message_reply_markup(
+                chat_id=callback.message.chat.id,
+                message_id=keyboard_message_id,
+                reply_markup=approved_keyboard
+            )
+            
+            # Отправляем подтверждение одобрения
+            await callback.message.answer(
+                f"✅ Заявка #{request_id} одобрена!\n\n"
+                f"Уведомления отправлены {supplier_count} поставщикам."
+            )
+        else:
+            # Просто отправляем новое сообщение
+            await callback.message.answer(
+                f"✅ Заявка #{request_id} одобрена!\n\n"
+                f"Уведомления отправлены {supplier_count} поставщикам."
+            )
     except Exception as e:
-        logger.error(f"Ошибка при одобрении заявки {request_id}: {e}")
-        await callback.message.answer(f"Произошла ошибка при одобрении заявки: {str(e)}")
+        logger.error(f"Ошибка при обновлении сообщения с заявкой {request_id}: {e}")
+        await callback.message.answer(
+            f"✅ Заявка #{request_id} одобрена, но возникла ошибка при обновлении сообщения."
+        )
+    
+    # Очищаем состояние
+    await state.clear()
 
 # Обработчик для кнопки "Отклонить" в личном чате админа для заявки
 @router.callback_query(F.data.startswith("admin:reject_request"))

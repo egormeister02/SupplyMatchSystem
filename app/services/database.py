@@ -1115,3 +1115,169 @@ class DBService:
                 WHERE id = :request_id
             """
             await DBService.execute(query, {"request_id": request_id, "status": status})
+
+    @staticmethod
+    async def create_matches_for_request(request_id: int) -> list:
+        """
+        Создает записи в таблице matches для заявки и всех подходящих поставщиков.
+        Находит всех поставщиков в той же категории и подкатегории, что и заявка.
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            list: Список словарей с информацией о созданных matches и поставщиках
+              [{'match_id': int, 'supplier_id': int, 'user_id': int}]
+        """
+        logger.info(f"Создание matches для заявки {request_id}")
+        
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service._create_matches_for_request(request_id)
+        except Exception as e:
+            logger.error(f"Ошибка при создании matches для заявки {request_id}: {e}")
+            import traceback
+            logger.error(f"Трассировка: {traceback.format_exc()}")
+            return []
+            
+    async def _create_matches_for_request(self, request_id: int) -> list:
+        """
+        Нестатическая версия метода создания matches для заявки.
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            list: Список словарей с информацией о созданных matches и поставщиках
+        """
+        logger.info("=== НАЧАЛО _create_matches_for_request ===")
+        try:
+            # Получаем информацию о заявке
+            logger.info(f"[Match] Запрос информации о заявке {request_id}")
+            request_data = await DBService.get_request_by_id_static(request_id)
+            if not request_data:
+                logger.error(f"Заявка с ID {request_id} не найдена")
+                return []
+                
+            # Получаем ID категории заявки
+            category_id = request_data.get("category_id")
+            if not category_id:
+                logger.error(f"У заявки {request_id} не указана категория")
+                return []
+                
+            logger.info(f"Категория заявки {request_id}: {category_id}")
+            
+            # Находим всех поставщиков в той же категории со статусом 'approved'
+            logger.info(f"[Match] Поиск поставщиков для категории {category_id}")
+            suppliers_query = """
+                SELECT 
+                    s.id AS supplier_id, 
+                    s.created_by_id AS user_id
+                FROM 
+                    suppliers s
+                WHERE 
+                    s.category_id = :category_id AND 
+                    s.status = 'approved'
+            """
+            
+            result = await self.execute_query(suppliers_query, {"category_id": category_id})
+            suppliers = result.mappings().all()
+            suppliers = [dict(s) for s in suppliers]
+            
+            if not suppliers:
+                logger.info(f"Не найдено подходящих поставщиков для заявки {request_id}")
+                return []
+                
+            logger.info(f"Найдено {len(suppliers)} подходящих поставщиков для заявки {request_id}")
+            
+            # Создаем записи в таблице matches для каждого поставщика
+            results = []
+            
+            for supplier in suppliers:
+                supplier_id = supplier.get("supplier_id")
+                user_id = supplier.get("user_id")
+                
+                if not supplier_id or not user_id:
+                    logger.warning(f"Пропущен поставщик {supplier} из-за отсутствия supplier_id или user_id")
+                    continue
+                
+                try:
+                    # Проверяем, существует ли уже запись match для этой пары
+                    logger.info(f"[Match] Проверка существования match для request_id={request_id}, supplier_id={supplier_id}")
+                    check_query = """
+                        SELECT id FROM matches 
+                        WHERE request_id = :request_id AND supplier_id = :supplier_id
+                    """
+                    check_result = await self.execute_query(check_query, {
+                        "request_id": request_id, 
+                        "supplier_id": supplier_id
+                    })
+                    existing_match = check_result.mappings().first()
+                    
+                    if existing_match:
+                        match_id = existing_match["id"]
+                        logger.info(f"Match для заявки {request_id} и поставщика {supplier_id} уже существует: {match_id}")
+                    else:
+                        # Создаем новую запись match
+                        logger.info(f"[Match] Создание новой записи match для request_id={request_id}, supplier_id={supplier_id}")
+                        insert_query = """
+                            INSERT INTO matches (request_id, supplier_id, status)
+                            VALUES (:request_id, :supplier_id, 'pending')
+                            RETURNING id
+                        """
+                        insert_result = await self.execute_query(insert_query, {
+                            "request_id": request_id, 
+                            "supplier_id": supplier_id
+                        })
+                        match_id = insert_result.scalar_one()
+                        logger.info(f"Создан match с ID {match_id} для заявки {request_id} и поставщика {supplier_id}")
+                    
+                    # Добавляем информацию в результат
+                    results.append({
+                        "match_id": match_id,
+                        "supplier_id": supplier_id,
+                        "user_id": user_id
+                    })
+                    logger.info(f"[Match] Добавлен результат: match_id={match_id}, supplier_id={supplier_id}, user_id={user_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка при создании match для заявки {request_id} и поставщика {supplier_id}: {e}")
+                    import traceback
+                    logger.error(f"Stack trace: {traceback.format_exc()}")
+                    continue
+            
+            # Проверяем, есть ли результаты
+            if not results:
+                logger.warning(f"[Match] Не создано ни одного match для заявки {request_id}")
+                return []
+                
+            # Важно: фиксируем все изменения в БД
+            logger.info(f"[Match] Фиксация изменений (commit) для заявки {request_id}")
+            try:
+                await self.commit()
+                logger.info(f"[Match] Транзакция успешно зафиксирована для заявки {request_id}")
+            except Exception as e:
+                logger.error(f"[Match] Ошибка при фиксации транзакции: {e}")
+                import traceback
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                raise
+            
+            logger.info(f"Успешно создано {len(results)} matches для заявки {request_id}")
+            logger.info("=== КОНЕЦ _create_matches_for_request (успешно) ===")
+            return results
+            
+        except Exception as e:
+            # В случае ошибки откатываем все изменения
+            logger.error(f"[Match] Ошибка в методе _create_matches_for_request: {e}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            try:
+                await self.rollback()
+                logger.info("[Match] Транзакция успешно откачена после ошибки")
+            except Exception as rollback_error:
+                logger.error(f"[Match] Ошибка при откате транзакции: {rollback_error}")
+            
+            logger.error(f"Ошибка при создании matches для заявки {request_id}: {e}")
+            logger.info("=== КОНЕЦ _create_matches_for_request (с ошибкой) ===")
+            return []

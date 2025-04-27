@@ -33,7 +33,7 @@ dp = Dispatcher(storage=storage)
 # Quart application initialization
 app = Quart(__name__)
 
-# Регистрация обработчиков и промежуточного ПО
+# Регистрируем роутеры и настраиваем middleware
 register_all_handlers(dp)
 setup_middlewares(dp)
 
