@@ -58,13 +58,19 @@ async def show_user_requests(user_id: int, chat_id: int, state: FSMContext, bot:
         # Создаем клавиатуру для навигации и управления
         keyboard = create_request_navigation_keyboard(request, current_index, len(requests))
         
+        # Получаем количество откликов на заявку, если она одобрена
+        matches_count = None
+        if request.get("status") == "approved":
+            matches_count = await DBService.get_matches_count_for_request(request.get("id"))
+        
         # Отправляем карточку заявки
         result = await send_request_card(
             bot=bot,
             chat_id=chat_id,
             request=request,
             keyboard=keyboard,
-            show_status=True  # Показываем статус заявки
+            show_status=True,  # Показываем статус заявки
+            matches_count=matches_count  # Передаем количество откликов
         )
         
         # Сохраняем message_id для дальнейшего использования
@@ -132,8 +138,11 @@ def create_request_navigation_keyboard(request, current_index, total_count):
     keyboard = []
     keyboard.append(navigation_row)
     
+    # Если заявка одобрена, добавляем кнопку просмотра откликов
     if status == "approved":
-        # Для одобренных заявок - только кнопка удаления
+        keyboard.append([
+            InlineKeyboardButton(text="🔍 Посмотреть отклики", callback_data=f"view_request_suppliers:{request_id}")
+        ])
         keyboard.append([
             InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_request:{request_id}")
         ])
@@ -195,13 +204,19 @@ async def next_my_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
     except Exception as e:
         app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
     
+    # Получаем количество откликов на заявку, если она одобрена
+    matches_count = None
+    if request.get("status") == "approved":
+        matches_count = await DBService.get_matches_count_for_request(request.get("id"))
+    
     # Отправляем новую карточку
     result = await send_request_card(
         bot=bot,
         chat_id=callback.message.chat.id,
         request=request,
         keyboard=keyboard,
-        show_status=True
+        show_status=True,
+        matches_count=matches_count  # Передаем количество откликов
     )
     
     # Обновляем ID сообщений в состоянии
@@ -249,13 +264,19 @@ async def prev_my_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
     except Exception as e:
         app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
     
+    # Получаем количество откликов на заявку, если она одобрена
+    matches_count = None
+    if request.get("status") == "approved":
+        matches_count = await DBService.get_matches_count_for_request(request.get("id"))
+    
     # Отправляем новую карточку
     result = await send_request_card(
         bot=bot,
         chat_id=callback.message.chat.id,
         request=request,
         keyboard=keyboard,
-        show_status=True
+        show_status=True,
+        matches_count=matches_count  # Передаем количество откликов
     )
     
     # Обновляем ID сообщений в состоянии
@@ -369,13 +390,19 @@ async def delete_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
         # Возвращаемся к состоянию просмотра заявок
         await state.set_state(MyRequestStates.viewing_requests)
         
+        # Получаем количество откликов на заявку, если она одобрена
+        matches_count = None
+        if request.get("status") == "approved":
+            matches_count = await DBService.get_matches_count_for_request(request.get("id"))
+        
         # Отправляем новую карточку
         result = await send_request_card(
             bot=bot,
             chat_id=callback.message.chat.id,
             request=request,
             keyboard=keyboard,
-            show_status=True
+            show_status=True,
+            matches_count=matches_count  # Передаем количество откликов
         )
         
         # Обновляем ID сообщений в состоянии
@@ -550,13 +577,19 @@ async def confirm_reapply_request(callback: CallbackQuery, state: FSMContext, bo
         # Устанавливаем состояние просмотра заявок
         await state.set_state(MyRequestStates.viewing_requests)
         
+        # Получаем количество откликов на заявку, если она одобрена
+        matches_count = None
+        if request.get("status") == "approved":
+            matches_count = await DBService.get_matches_count_for_request(request.get("id"))
+        
         # Отправляем новую карточку
         result = await send_request_card(
             bot=bot,
             chat_id=callback.message.chat.id,
             request=request,
             keyboard=keyboard,
-            show_status=True
+            show_status=True,
+            matches_count=matches_count  # Передаем количество откликов
         )
         
         # Обновляем ID сообщений в состоянии
@@ -686,6 +719,309 @@ async def edit_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
 async def handle_current_my_request(callback: CallbackQuery):
     """
     Обработчик для кнопки с текущим индексом заявки.
+    Просто отвечает на колбэк без действий, чтобы кнопка не мерцала.
+    """
+    await callback.answer()
+
+# Обработчик для просмотра откликов на заявку
+@router.callback_query(MyRequestStates.viewing_requests, F.data.startswith("view_request_suppliers:"))
+async def view_request_suppliers(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обработчик для просмотра поставщиков, откликнувшихся на заявку
+    """
+    await callback.answer()
+    
+    # Получаем ID заявки из callback_data
+    request_id = int(callback.data.split(":")[1])
+    
+    # Получаем поставщиков, которые откликнулись на заявку
+    suppliers = await DBService.get_suppliers_for_request(request_id)
+    
+    if not suppliers:
+        await callback.message.answer("На данную заявку пока нет откликов от поставщиков.")
+        return
+    
+    # Сохраняем данные в состоянии
+    await state.update_data(
+        request_suppliers=suppliers,
+        current_supplier_index=0,
+        request_id=request_id
+    )
+    
+    # Устанавливаем состояние просмотра откликов
+    await state.set_state(MyRequestStates.viewing_request_suppliers)
+    
+    # Получаем текущий индекс и поставщика
+    current_index = 0
+    supplier = suppliers[current_index]
+    
+    # Получаем ID сообщений карточки заявки для удаления
+    state_data = await state.get_data()
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    
+    # Удаляем сообщения карточки заявки
+    try:
+        for msg_id in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении медиа сообщения {msg_id}: {e}")
+        
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении сообщения с клавиатурой {keyboard_message_id}: {e}")
+    except Exception as e:
+        app_logger.error(f"Общая ошибка при удалении сообщений карточки: {e}")
+    
+    # Создаем клавиатуру для навигации по откликам
+    keyboard = create_supplier_response_keyboard(supplier, current_index, len(suppliers), request_id)
+    
+    # Отправляем карточку поставщика
+    from app.utils.message_utils import send_supplier_card
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard
+    )
+    
+    # Сохраняем message_id для дальнейшего использования
+    await state.update_data(
+        keyboard_message_id=result.get("keyboard_message_id"),
+        media_message_ids=result.get("media_message_ids", [])
+    )
+
+# Функция для создания клавиатуры навигации по откликам
+def create_supplier_response_keyboard(supplier, current_index, total_count, request_id):
+    """
+    Создает клавиатуру для навигации по откликам
+    
+    Args:
+        supplier (dict): Данные поставщика
+        current_index (int): Текущий индекс в списке
+        total_count (int): Общее количество поставщиков
+        request_id (int): ID заявки
+        
+    Returns:
+        InlineKeyboardMarkup: Клавиатура для навигации
+    """
+    # Основные кнопки навигации
+    navigation_row = [
+        InlineKeyboardButton(text="◀️", callback_data="prev_request_supplier"),
+        InlineKeyboardButton(text=f"{current_index + 1}/{total_count}", callback_data="current_request_supplier"),
+        InlineKeyboardButton(text="▶️", callback_data="next_request_supplier")
+    ]
+    
+    keyboard = []
+    keyboard.append(navigation_row)
+    
+    # Добавляем кнопку возврата к заявке
+    keyboard.append([
+        InlineKeyboardButton(text="↩️ Назад к заявке", callback_data=f"back_to_request:{request_id}")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Обработчик для кнопки "Следующий поставщик"
+@router.callback_query(MyRequestStates.viewing_request_suppliers, F.data == "next_request_supplier")
+async def next_request_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обработчик для перехода к следующему поставщику в списке откликов
+    """
+    await callback.answer()
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    suppliers = state_data.get("request_suppliers", [])
+    current_index = state_data.get("current_supplier_index", 0)
+    request_id = state_data.get("request_id")
+    
+    # Рассчитываем следующий индекс (с цикличностью)
+    next_index = (current_index + 1) % len(suppliers)
+    
+    # Получаем следующего поставщика
+    supplier = suppliers[next_index]
+    
+    # Обновляем индекс в состоянии
+    await state.update_data(current_supplier_index=next_index)
+    
+    # Создаем клавиатуру
+    keyboard = create_supplier_response_keyboard(supplier, next_index, len(suppliers), request_id)
+    
+    # Получаем информацию о предыдущих сообщениях
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    
+    # Удаляем предыдущие сообщения, если они есть
+    try:
+        for msg_id in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+        
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+    except Exception as e:
+        app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
+    
+    # Отправляем новую карточку
+    from app.utils.message_utils import send_supplier_card
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard
+    )
+    
+    # Обновляем ID сообщений в состоянии
+    await state.update_data(
+        keyboard_message_id=result.get("keyboard_message_id"),
+        media_message_ids=result.get("media_message_ids", [])
+    )
+
+# Обработчик для кнопки "Предыдущий поставщик"
+@router.callback_query(MyRequestStates.viewing_request_suppliers, F.data == "prev_request_supplier")
+async def prev_request_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обработчик для перехода к предыдущему поставщику в списке откликов
+    """
+    await callback.answer()
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    suppliers = state_data.get("request_suppliers", [])
+    current_index = state_data.get("current_supplier_index", 0)
+    request_id = state_data.get("request_id")
+    
+    # Рассчитываем предыдущий индекс (с цикличностью)
+    prev_index = (current_index - 1) % len(suppliers)
+    
+    # Получаем предыдущего поставщика
+    supplier = suppliers[prev_index]
+    
+    # Обновляем индекс в состоянии
+    await state.update_data(current_supplier_index=prev_index)
+    
+    # Создаем клавиатуру
+    keyboard = create_supplier_response_keyboard(supplier, prev_index, len(suppliers), request_id)
+    
+    # Получаем информацию о предыдущих сообщениях
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    
+    # Удаляем предыдущие сообщения, если они есть
+    try:
+        for msg_id in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+        
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+    except Exception as e:
+        app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
+    
+    # Отправляем новую карточку
+    from app.utils.message_utils import send_supplier_card
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard
+    )
+    
+    # Обновляем ID сообщений в состоянии
+    await state.update_data(
+        keyboard_message_id=result.get("keyboard_message_id"),
+        media_message_ids=result.get("media_message_ids", [])
+    )
+
+# Обработчик для кнопки "Назад к заявке"
+@router.callback_query(MyRequestStates.viewing_request_suppliers, F.data.startswith("back_to_request:"))
+async def back_to_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обработчик для возврата к просмотру заявки
+    """
+    await callback.answer()
+    
+    # Получаем ID заявки
+    request_id = int(callback.data.split(":")[1])
+    
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    
+    # Удаляем сообщения с карточкой поставщика
+    try:
+        for msg_id in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении медиа сообщения {msg_id}: {e}")
+        
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении сообщения с клавиатурой {keyboard_message_id}: {e}")
+    except Exception as e:
+        app_logger.error(f"Общая ошибка при удалении сообщений карточки: {e}")
+    
+    # Получаем информацию о заявке
+    request_data = await DBService.get_request_by_id_static(request_id)
+    if not request_data:
+        await callback.message.answer("Ошибка: не удалось получить информацию о заявке")
+        await state.set_state(MyRequestStates.viewing_requests)
+        return
+    
+    # Получаем список всех заявок пользователя
+    user_requests = await DBService.get_user_requests_static(callback.from_user.id)
+    
+    # Находим индекс текущей заявки в списке
+    current_index = 0
+    for i, req in enumerate(user_requests):
+        if req["id"] == request_id:
+            current_index = i
+            break
+    
+    # Обновляем данные в состоянии
+    await state.update_data(
+        user_requests=user_requests,
+        current_index=current_index
+    )
+    
+    # Устанавливаем состояние просмотра заявок
+    await state.set_state(MyRequestStates.viewing_requests)
+    
+    # Создаем клавиатуру навигации по заявкам
+    keyboard = create_request_navigation_keyboard(request_data, current_index, len(user_requests))
+    
+    # Получаем количество откликов на заявку
+    matches_count = None
+    if request_data.get("status") == "approved":
+        matches_count = await DBService.get_matches_count_for_request(request_id)
+    
+    # Отправляем карточку заявки
+    result = await send_request_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        request=request_data,
+        keyboard=keyboard,
+        show_status=True,
+        matches_count=matches_count
+    )
+    
+    # Обновляем ID сообщений в состоянии
+    await state.update_data(
+        keyboard_message_id=result.get("keyboard_message_id"),
+        media_message_ids=result.get("media_message_ids", [])
+    )
+
+# Обработчик для кнопки с текущим индексом поставщика
+@router.callback_query(MyRequestStates.viewing_request_suppliers, F.data == "current_request_supplier")
+async def handle_current_request_supplier(callback: CallbackQuery):
+    """
+    Обработчик для кнопки с текущим индексом поставщика.
     Просто отвечает на колбэк без действий, чтобы кнопка не мерцала.
     """
     await callback.answer()

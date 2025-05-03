@@ -1492,3 +1492,88 @@ class DBService:
             logger.error(f"Ошибка при создании matches для заявки {request_id}: {e}")
             logger.info("=== КОНЕЦ _create_matches_for_request (с ошибкой) ===")
             return []
+
+    @staticmethod
+    async def get_matches_count_for_request(request_id: int) -> int:
+        """
+        Получает количество откликов (matches) для конкретной заявки
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            int: Количество откликов на заявку
+        """
+        logger.info(f"Получение количества откликов для заявки {request_id}")
+        
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                
+                # Запрос на подсчет matches
+                query = """
+                    SELECT COUNT(*) AS matches_count
+                    FROM matches
+                    WHERE request_id = :request_id AND status = 'accepted'
+                """
+                
+                result = await db_service.execute_query(query, {"request_id": request_id})
+                row = result.mappings().first()
+                
+                if row:
+                    matches_count = row["matches_count"]
+                    logger.info(f"Для заявки {request_id} найдено {matches_count} откликов")
+                    return matches_count
+                else:
+                    logger.info(f"Не удалось получить количество откликов для заявки {request_id}")
+                    return 0
+                    
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества откликов для заявки {request_id}: {e}")
+            return 0
+
+    @staticmethod
+    async def get_suppliers_for_request(request_id: int) -> list:
+        """
+        Получает список поставщиков, откликнувшихся на заявку
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            list: Список словарей с данными о поставщиках
+        """
+        logger.info(f"Получение списка откликнувшихся поставщиков для заявки {request_id}")
+        
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                
+                # Запрос для получения ID поставщиков, принявших заявку
+                query = """
+                    SELECT supplier_id
+                    FROM matches
+                    WHERE request_id = :request_id AND status = 'accepted'
+                """
+                
+                result = await db_service.execute_query(query, {"request_id": request_id})
+                supplier_ids = [row['supplier_id'] for row in result.mappings().all()]
+                
+                if not supplier_ids:
+                    logger.info(f"Для заявки {request_id} не найдено откликнувшихся поставщиков")
+                    return []
+                
+                logger.info(f"Найдено {len(supplier_ids)} откликов на заявку {request_id}: {supplier_ids}")
+                
+                # Получаем данные о каждом поставщике
+                suppliers = []
+                for supplier_id in supplier_ids:
+                    supplier_data = await DBService.get_supplier_by_id_static(supplier_id)
+                    if supplier_data:
+                        suppliers.append(supplier_data)
+                
+                return suppliers
+                
+        except Exception as e:
+            logger.error(f"Ошибка при получении поставщиков для заявки {request_id}: {e}")
+            return []

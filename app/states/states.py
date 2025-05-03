@@ -64,9 +64,11 @@ class MySupplierStates(StatesGroup):
 
 # Новые состояния для работы с "Мои заявки"
 class MyRequestStates(StatesGroup):
-    viewing_requests = State()     # Просмотр заявок пользователя
-    confirm_delete = State()       # Подтверждение удаления заявки
-    confirm_reapply = State()      # Подтверждение повторной отправки на проверку
+    """Состояния для управления своими заявками"""
+    viewing_requests = State()
+    confirm_delete = State()
+    confirm_reapply = State()
+    viewing_request_suppliers = State()  # Состояние просмотра откликов на заявку
     editing_request = State()      # Редактирование заявки
     selecting_attribute = State()  # Выбор атрибута для редактирования
 
