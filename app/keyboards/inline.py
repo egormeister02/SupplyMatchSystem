@@ -57,7 +57,7 @@ def get_back_button(back_target, is_state=True, button_text="Назад", state_
     Универсальная кнопка "Назад", которая работает как с состояниями, так и с действиями
     
     Args:
-        back_target (str): Имя состояния или действия для возврата
+        back_target (str or State): Имя состояния или действия, или объект State для возврата
         is_state (bool): True, если это состояние, False, если действие
         button_text (str): Текст на кнопке, по умолчанию "Назад"
         state_group (str, optional): Название группы состояний (например, "RegistrationStates", "SupplierCreationStates")
@@ -67,23 +67,33 @@ def get_back_button(back_target, is_state=True, button_text="Назад", state_
         InlineKeyboardButton: Кнопка "Назад" с соответствующим callback_data
     """
     if is_state:
-        # Если группа не указана, используем значение по умолчанию
-        if state_group is None:
-            # Определяем группу по имени состояния
-            if back_target.startswith("waiting_"):
-                # Для состояния waiting_phone проверяем, относится ли оно к SupplierCreationStates
-                # или RegistrationStates на основе контекста и имени
-                if back_target in ["waiting_phone", "waiting_email", "waiting_contact"]:
-                    # Эти состояния могут быть как в SupplierCreationStates, так и в RegistrationStates
-                    state_group = "SupplierCreationStates"
+        # Проверяем, является ли back_target объектом State
+        if hasattr(back_target, '__class__') and back_target.__class__.__name__ == 'State':
+            # Получаем имя модуля и класса состояния
+            module_name = back_target.__module__.split('.')[-1]
+            class_name = back_target.__class__.__qualname__
+            state_name = back_target.state
+            
+            # Формируем callback_data с полным путем к состоянию
+            callback_data = f"back_to_state:{state_name}"
+        else:
+            # Если группа не указана, используем значение по умолчанию
+            if state_group is None:
+                # Определяем группу по имени состояния
+                if isinstance(back_target, str) and back_target.startswith("waiting_"):
+                    # Для состояния waiting_phone проверяем, относится ли оно к SupplierCreationStates
+                    # или RegistrationStates на основе контекста и имени
+                    if back_target in ["waiting_phone", "waiting_email", "waiting_contact"]:
+                        # Эти состояния могут быть как в SupplierCreationStates, так и в RegistrationStates
+                        state_group = "SupplierCreationStates"
+                    else:
+                        # Для других состояний предполагаем, что они в SupplierCreationStates
+                        state_group = "SupplierCreationStates"
                 else:
-                    # Для других состояний предполагаем, что они в SupplierCreationStates
-                    state_group = "SupplierCreationStates"
-            else:
-                # Для других форматов имен состояний предполагаем, что они в RegistrationStates
-                state_group = "RegistrationStates"
-        
-        callback_data = f"back_to_state:{state_group}:{back_target}"
+                    # Для других форматов имен состояний предполагаем, что они в RegistrationStates
+                    state_group = "RegistrationStates"
+            
+            callback_data = f"back_to_state:{state_group}:{back_target}"
     else:
         callback_data = f"back_to_action:{back_target}"
     

@@ -167,12 +167,6 @@ class NotificationQueue:
                         text="❌ Отклонить",
                         callback_data=f"match:reject:{match_id}"
                     )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔍 Подробности",
-                        callback_data=f"match:details:{match_id}"
-                    )
                 ]
             ]
         )

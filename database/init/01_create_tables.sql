@@ -62,9 +62,9 @@ CREATE TABLE requests (
     status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
     rejection_reason TEXT,
     verified_by_id BIGINT,
-    FOREIGN KEY (created_by_id) REFERENCES users(tg_id),
+    FOREIGN KEY (created_by_id) REFERENCES users(tg_id) ON DELETE SET NULL,
     FOREIGN KEY (category_id) REFERENCES categories(id),
-    FOREIGN KEY (verified_by_id) REFERENCES users(tg_id)
+    FOREIGN KEY (verified_by_id) REFERENCES users(tg_id) ON DELETE SET NULL
 );
 
 -- Create files table
@@ -84,10 +84,13 @@ CREATE TABLE files (
 -- Create matches table
 CREATE TABLE matches (
     id SERIAL PRIMARY KEY,
-    request_id INTEGER REFERENCES requests(id) NOT NULL,
-    supplier_id INTEGER REFERENCES suppliers(id) NOT NULL,
+    request_id INTEGER NOT NULL,
+    supplier_id INTEGER NOT NULL,
     status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 );
 
 -- Create favorites table

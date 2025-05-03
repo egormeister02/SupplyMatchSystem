@@ -12,6 +12,7 @@ from app.utils.message_utils import remove_keyboard_from_context, edit_message_t
 from app.config.action_config import get_action_config
 from app.states.states import SupplierCreationStates, RequestCreationStates
 from app.states.state_config import get_state_config
+from app.handlers.my_requests import show_user_requests
 
 # Инициализируем роутер
 router = Router()
@@ -27,6 +28,7 @@ async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContex
     
     # Получаем действие из callback_data
     action = callback.data
+    logging.info(f"Обрабатываю действие меню: {action}")
     
     # Получаем конфигурацию для действия
     action_config = get_action_config(action)
@@ -35,21 +37,67 @@ async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContex
         await callback.message.answer("Неизвестное действие")
         return
     
-    # Редактируем текущее сообщение вместо отправки нового
-    result = await edit_message_text_and_keyboard(
-        bot=bot,
-        chat_id=callback.message.chat.id,
-        message_id=callback.message.message_id,
-        text=action_config.get("text", "Выполняется действие..."),
-        reply_markup=action_config.get("markup")
-    )
-    
-    # Если редактирование не удалось, отправляем новое сообщение
-    if not result:
-        await callback.message.answer(
+    try:
+        # Получаем информацию о сообщении
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
+        has_text = bool(callback.message.text)
+        has_caption = bool(callback.message.caption)
+        has_photo = bool(callback.message.photo)
+        has_media = bool(callback.message.photo or callback.message.video or callback.message.audio or callback.message.document)
+        
+        # Логируем информацию о сообщении
+        logging.info(f"Сообщение {message_id} в чате {chat_id}:")
+        logging.info(f"- Имеет текст: {has_text}")
+        logging.info(f"- Имеет подпись: {has_caption}")
+        logging.info(f"- Имеет фото: {has_photo}")
+        logging.info(f"- Имеет медиа: {has_media}")
+        
+        # Кнопка "Назад" всегда должна создавать новое сообщение для сообщений с медиа
+        # Просто отправляем новое сообщение и удаляем старое
+        logging.info("Создаю новое сообщение и удаляю старое")
+        
+        # 1. Отправляем новое сообщение
+        new_message = await callback.message.answer(
             action_config.get("text", "Выполняется действие..."),
             reply_markup=action_config.get("markup")
         )
+        logging.info(f"Новое сообщение создано с ID: {new_message.message_id}")
+        
+        # 2. Пытаемся удалить старое сообщение
+        try:
+            await callback.message.delete()
+            logging.info(f"Старое сообщение {message_id} удалено")
+        except Exception as e:
+            logging.warning(f"Не удалось удалить старое сообщение: {str(e)}")
+            
+    except Exception as e:
+        logging.error(f"Ошибка при обработке действия меню: {str(e)}")
+        await callback.message.answer(
+            "Произошла ошибка при выполнении действия. Пожалуйста, попробуйте позже."
+        )
+
+@router.callback_query(F.data == "my_requests")
+async def handle_my_requests(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """
+    Обработчик для кнопки "Мои заявки".
+    Показывает список заявок пользователя.
+    """
+    await callback.answer()
+    
+    # Удаляем сообщение меню
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить сообщение меню: {e}")
+        
+    # Показываем список заявок пользователя
+    await show_user_requests(
+        user_id=callback.from_user.id,
+        chat_id=callback.message.chat.id,
+        state=state,
+        bot=bot
+    )
 
 @router.callback_query(F.data == "create_supplier")
 async def handle_create_supplier(callback: CallbackQuery, bot: Bot, state: FSMContext):
@@ -180,6 +228,7 @@ async def handle_back_to_action(callback: CallbackQuery, bot: Bot, state: FSMCon
     
     # Получаем имя действия из callback_data
     target_action = callback.data.replace("back_to_action:", "")
+    logging.info(f"Обрабатываю возврат к действию: {target_action}")
     
     # Получаем конфигурацию для целевого действия
     action_config = get_action_config(target_action)
@@ -188,20 +237,31 @@ async def handle_back_to_action(callback: CallbackQuery, bot: Bot, state: FSMCon
         await callback.message.answer("Конфигурация для указанного действия не найдена")
         return
     
-    # Редактируем текущее сообщение вместо отправки нового
-    result = await edit_message_text_and_keyboard(
-        bot=bot,
-        chat_id=callback.message.chat.id,
-        message_id=callback.message.message_id,
-        text=action_config.get("text", "Возврат к предыдущему меню"),
-        reply_markup=action_config.get("markup")
-    )
-    
-    # Если редактирование не удалось, отправляем новое сообщение
-    if not result:
-        await callback.message.answer(
+    try:
+        # Получаем информацию о сообщении
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
+        
+        logging.info(f"Создаю новое сообщение и удаляю старое для действия back_to_action:{target_action}")
+        
+        # 1. Отправляем новое сообщение
+        new_message = await callback.message.answer(
             action_config.get("text", "Возврат к предыдущему меню"),
             reply_markup=action_config.get("markup")
+        )
+        logging.info(f"Новое сообщение создано с ID: {new_message.message_id}")
+        
+        # 2. Пытаемся удалить старое сообщение
+        try:
+            await callback.message.delete()
+            logging.info(f"Старое сообщение {message_id} удалено")
+        except Exception as e:
+            logging.warning(f"Не удалось удалить старое сообщение: {str(e)}")
+            
+    except Exception as e:
+        logging.error(f"Ошибка при обработке возврата к действию: {str(e)}")
+        await callback.message.answer(
+            "Произошла ошибка при выполнении действия. Пожалуйста, попробуйте позже."
         )
 
 # Добавление роутера в основной диспетчер

@@ -10,7 +10,7 @@ from app.keyboards.inline import (
     get_back_button,
 )
 
-from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates, MyRequestStates
 from app.services import get_db_session, DBService
 import logging
 
@@ -490,7 +490,7 @@ my_supplier_config = {
         ),
     },
     
-    # Состояние подтверждения удаления
+    # Состояние подтверждения удаления поставщика
     MySupplierStates.confirm_delete: {
         "text": "Вы уверены, что хотите удалить этого поставщика? Это действие невозможно отменить.",
         "markup": InlineKeyboardMarkup(
@@ -504,7 +504,7 @@ my_supplier_config = {
         "back_state": MySupplierStates.viewing_suppliers,
     },
     
-    # Состояние подтверждения повторной отправки
+    # Состояние подтверждения повторной отправки поставщика
     MySupplierStates.confirm_reapply: {
         "text": "Вы собираетесь отправить поставщика на повторную проверку. Подтверждаете?",
         "markup": InlineKeyboardMarkup(
@@ -520,34 +520,116 @@ my_supplier_config = {
     
     # Состояние редактирования поставщика
     MySupplierStates.editing_supplier: {
-        "text": "Редактирование поставщика",
-        "markup": get_back_keyboard("viewing_suppliers", is_state=True, button_text="Назад к просмотру", state_group="MySupplierStates"),
+        "text": "Редактирование поставщика:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button(MySupplierStates.viewing_suppliers, button_text="Назад к просмотру")]
+            ]
+        ),
         "back_state": MySupplierStates.viewing_suppliers,
     },
     
     # Состояние выбора атрибута для редактирования
     MySupplierStates.selecting_attribute: {
-        "text": "Выберите, что вы хотите отредактировать (введите номер):",
+        "text": "Выберите, что вы хотите отредактировать:",
+        "attributes": [
+            {"name": "company_name", "display": "Название компании"},
+            {"name": "category", "display": "Категория"},
+            {"name": "product_name", "display": "Название товара/услуги"},
+            {"name": "description", "display": "Описание"},
+            {"name": "price", "display": "Цена"},
+            {"name": "min_order", "display": "Минимальный заказ"},
+            {"name": "delivery_time", "display": "Срок доставки"},
+            {"name": "region", "display": "Регион"},
+            {"name": "photos", "display": "Фотографии"},
+            {"name": "contact_username", "display": "Telegram контакт"},
+            {"name": "contact_phone", "display": "Телефон"},
+            {"name": "contact_email", "display": "Email"}
+        ],
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Завершить редактирование", callback_data="finish_editing")]
+                [get_back_button(MySupplierStates.viewing_suppliers, button_text="Отмена")]
             ]
         ),
         "back_state": MySupplierStates.viewing_suppliers,
+    },
+}
+
+# Конфигурация для "Мои заявки"
+my_request_config = {
+    # Состояние просмотра моих заявок
+    MyRequestStates.viewing_requests: {
+        "text": "Мои заявки:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="◀️", callback_data="prev_my_request"),
+                    InlineKeyboardButton(text="1/1", callback_data="current_my_request"),
+                    InlineKeyboardButton(text="▶️", callback_data="next_my_request")
+                ],
+                [get_back_button("requests", is_state=False, button_text="Назад к меню заявок")]
+            ]
+        ),
+    },
+    
+    # Состояние подтверждения удаления заявки
+    MyRequestStates.confirm_delete: {
+        "text": "Вы уверены, что хотите удалить эту заявку? Это действие невозможно отменить.",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, удалить", callback_data="confirm_delete"),
+                    InlineKeyboardButton(text="❌ Нет, отмена", callback_data="cancel_delete")
+                ]
+            ]
+        ),
+        "back_state": MyRequestStates.viewing_requests,
+    },
+    
+    # Состояние подтверждения повторной отправки заявки
+    MyRequestStates.confirm_reapply: {
+        "text": "Вы собираетесь отправить заявку на повторную проверку. Подтверждаете?",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, отправить", callback_data="confirm_reapply"),
+                    InlineKeyboardButton(text="❌ Нет, отмена", callback_data="cancel_reapply")
+                ]
+            ]
+        ),
+        "back_state": MyRequestStates.viewing_requests,
+    },
+    
+    # Состояние редактирования заявки
+    MyRequestStates.editing_request: {
+        "text": "Редактирование заявки:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button(MyRequestStates.viewing_requests, button_text="Назад к просмотру")]
+            ]
+        ),
+        "back_state": MyRequestStates.viewing_requests,
+    },
+    
+    # Состояние выбора атрибута для редактирования заявки
+    MyRequestStates.selecting_attribute: {
+        "text": "Выберите, что вы хотите отредактировать:",
         "attributes": [
-            {"name": "company_name", "display": "Название компании", "state": SupplierCreationStates.waiting_company_name},
-            {"name": "main_category", "display": "Категория и подкатегория", "state": SupplierCreationStates.waiting_main_category},
-            {"name": "product_name", "display": "Название продукта/услуги", "state": SupplierCreationStates.waiting_product_name},
-            {"name": "description", "display": "Описание", "state": SupplierCreationStates.waiting_description},
-            {"name": "country", "display": "Страна", "state": SupplierCreationStates.waiting_country},
-            {"name": "region", "display": "Регион", "state": SupplierCreationStates.waiting_region},
-            {"name": "city", "display": "Город", "state": SupplierCreationStates.waiting_city},
-            {"name": "address", "display": "Адрес", "state": SupplierCreationStates.waiting_address},
-            {"name": "contact_username", "display": "Telegram контакт", "state": SupplierCreationStates.waiting_tg_username},
-            {"name": "contact_phone", "display": "Телефон", "state": SupplierCreationStates.waiting_phone},
-            {"name": "contact_email", "display": "Email", "state": SupplierCreationStates.waiting_email}
-        ]
-    }
+            {"name": "main_category", "display": "Основная категория"},
+            {"name": "subcategory", "display": "Подкатегория"},
+            {"name": "description", "display": "Описание"},
+            {"name": "photos", "display": "Фотографии"},
+            {"name": "contact_username", "display": "Telegram контакт"},
+            {"name": "contact_phone", "display": "Телефон"},
+            {"name": "contact_email", "display": "Email"}
+        ],
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button(MyRequestStates.viewing_requests, button_text="Отмена")]
+            ]
+        ),
+        "back_state": MyRequestStates.viewing_requests,
+    },
 }
 
 # Функция получения конфигурации для состояния
@@ -556,7 +638,7 @@ def get_state_config(state):
     Получает конфигурацию для указанного состояния.
     
     Args:
-        state: Объект состояния из RegistrationStates, SupplierCreationStates или SupplierSearchStates
+        state: Объект состояния
         
     Returns:
         dict: Конфигурация для указанного состояния или None
@@ -573,12 +655,39 @@ def get_state_config(state):
         config = request_creation_config[state]
     elif state in my_supplier_config:
         config = my_supplier_config[state]
+    elif state in my_request_config:
+        config = my_request_config[state]
         
     return config
 
 # Функция получения предыдущего состояния
 def get_previous_state(current_state):
+    """
+    Возвращает состояние "назад" для текущего состояния.
+    
+    Args:
+        current_state: Текущее состояние
+        
+    Returns:
+        Объект состояния для возврата или None
+    """
     config = get_state_config(current_state)
     if config and "back_state" in config:
         return config["back_state"]
     return None
+
+# Helper functions for formatting lists, options, etc.
+def get_category_text(category_name, subcategory_name=None):
+    """
+    Возвращает текстовое представление категории и подкатегории.
+    
+    Args:
+        category_name (str): Название категории
+        subcategory_name (str, optional): Название подкатегории
+        
+    Returns:
+        str: Форматированная строка
+    """
+    if subcategory_name:
+        return f"{category_name} ➡️ {subcategory_name}"
+    return category_name

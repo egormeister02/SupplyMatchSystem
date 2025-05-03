@@ -465,7 +465,7 @@ async def send_request_card(
     message_id: Optional[int] = None,
     include_video: bool = True,  # Параметр для включения видео в группу
     show_status: bool = False    # Параметр для отображения статуса заявки
-) -> Optional[Message]:
+) -> dict:
     """
     Отправляет или редактирует карточку заявки в указанный чат.
     
@@ -479,7 +479,9 @@ async def send_request_card(
         show_status (bool): Показывать ли статус заявки
         
     Returns:
-        Optional[Message]: Сообщение с клавиатурой или None в случае ошибки
+        dict: Словарь с message_ids всех отправленных сообщений:
+            - keyboard_message_id: ID сообщения с клавиатурой
+            - media_message_ids: список ID сообщений медиагруппы или ID сообщения с фото
     """
     # Получаем информацию о категории
     category_name = request.get('category_name', 'Не указана')
@@ -559,6 +561,12 @@ async def send_request_card(
             text += f"\n\n❗ Причина отклонения: {request.get('rejection_reason')}"
     
     logging.info(f"Фотографии заявки: {photos}")
+    
+    # Результат, который будет возвращен функцией
+    result = {
+        "keyboard_message_id": None,
+        "media_message_ids": []
+    }
     
     # Получаем пути ко всем фотографиям
     photo_paths = []
@@ -648,6 +656,9 @@ async def send_request_card(
                 media=media
             )
             
+            # Сохраняем все ID медиа-сообщений
+            result["media_message_ids"] = [msg.message_id for msg in media_messages]
+            
             # Для медиагруппы отправляем клавиатуру отдельным сообщением
             if keyboard:
                 keyboard_message = await bot.send_message(
@@ -655,9 +666,9 @@ async def send_request_card(
                     text="Используйте кнопки для навигации:",
                     reply_markup=keyboard
                 )
-                return keyboard_message
-            else:
-                return None
+                result["keyboard_message_id"] = keyboard_message.message_id
+            
+            return result
                 
         except Exception as e:
             logging.error(f"Ошибка при отправке медиа-группы: {e}")
@@ -667,7 +678,9 @@ async def send_request_card(
                 text=text,
                 reply_markup=keyboard
             )
-            return msg
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
     # Если есть только одна фотография, отправляем её с текстом и клавиатурой
     elif len(photo_paths) == 1:
         # Если был message_id, удаляем старое сообщение
@@ -685,7 +698,9 @@ async def send_request_card(
                 caption=text,
                 reply_markup=keyboard
             )
-            return message
+            result["keyboard_message_id"] = message.message_id
+            result["media_message_ids"] = [message.message_id]
+            return result
         except Exception as e:
             logging.error(f"Ошибка при отправке фотографии: {e}")
             # Если не удалось отправить фото, отправляем просто текст
@@ -694,7 +709,9 @@ async def send_request_card(
                 text=text,
                 reply_markup=keyboard
             )
-            return msg
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
     # Если есть только видео, отправляем его с текстом и клавиатурой
     elif video_path:
         logging.info(f"Отправляем только видео: {video_path}")
@@ -713,7 +730,9 @@ async def send_request_card(
                 caption=text,
                 reply_markup=keyboard
             )
-            return message
+            result["keyboard_message_id"] = message.message_id
+            result["media_message_ids"] = [message.message_id]
+            return result
         except Exception as e:
             logging.error(f"Ошибка при отправке видео: {e}")
             # Выводим трассировку ошибки для отладки
@@ -725,7 +744,9 @@ async def send_request_card(
                 text=text,
                 reply_markup=keyboard
             )
-            return msg
+            result["keyboard_message_id"] = msg.message_id
+            result["media_message_ids"] = [msg.message_id]
+            return result
     else:
         # Если нет фото и видео, отправляем текстовое сообщение с клавиатурой
         message = await bot.send_message(
@@ -733,4 +754,6 @@ async def send_request_card(
             text=text,
             reply_markup=keyboard
         )
-        return message
+        result["keyboard_message_id"] = message.message_id
+        result["media_message_ids"] = [message.message_id]
+        return result

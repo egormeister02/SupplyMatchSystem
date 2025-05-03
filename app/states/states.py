@@ -62,3 +62,11 @@ class MySupplierStates(StatesGroup):
     editing_supplier = State()     # Редактирование поставщика
     selecting_attribute = State()  # Выбор атрибута для редактирования
 
+# Новые состояния для работы с "Мои заявки"
+class MyRequestStates(StatesGroup):
+    viewing_requests = State()     # Просмотр заявок пользователя
+    confirm_delete = State()       # Подтверждение удаления заявки
+    confirm_reapply = State()      # Подтверждение повторной отправки на проверку
+    editing_request = State()      # Редактирование заявки
+    selecting_attribute = State()  # Выбор атрибута для редактирования
+

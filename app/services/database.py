@@ -1098,23 +1098,234 @@ class DBService:
         
         Args:
             request_id (int): ID заявки
-            status (str): Новый статус (approved/rejected/pending)
-            rejection_reason (str, optional): Причина отклонения (для rejected)
+            status (str): Новый статус (pending/approved/rejected)
+            rejection_reason (str, optional): Причина отклонения (если статус rejected)
+        
+        Returns:
+            bool: True при успешном обновлении, False при ошибке
         """
-        if status == "rejected" and rejection_reason:
-            query = """
-                UPDATE requests
-                SET status = :status, rejection_reason = :rejection_reason
-                WHERE id = :request_id
-            """
-            await DBService.execute(query, {"request_id": request_id, "status": status, "rejection_reason": rejection_reason})
-        else:
+        try:
             query = """
                 UPDATE requests
                 SET status = :status
+            """
+            
+            params = {"request_id": request_id, "status": status}
+            
+            # Если статус отклонен и есть причина отклонения
+            if status == "rejected" and rejection_reason:
+                query += ", rejection_reason = :rejection_reason"
+                params["rejection_reason"] = rejection_reason
+            
+            query += " WHERE id = :request_id"
+            
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                await db_service.execute_query(query, params)
+                await db_service.commit()
+                return True
+                
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении статуса заявки {request_id}: {e}")
+            return False
+            
+    async def get_user_requests(self, user_id: int) -> list:
+        """
+        Получает список заявок пользователя.
+        
+        Args:
+            user_id (int): ID пользователя-создателя
+            
+        Returns:
+            list: Список словарей с информацией о заявках пользователя
+        """
+        try:
+            query = """
+                SELECT 
+                    r.*,
+                    c.name as category_name,
+                    c.id as category_id,
+                    mc.name as main_category_name
+                FROM 
+                    requests r
+                JOIN
+                    categories c ON r.category_id = c.id
+                JOIN
+                    main_categories mc ON c.main_category_name = mc.name
+                WHERE 
+                    r.created_by_id = :user_id
+                ORDER BY 
+                    r.created_at DESC
+            """
+            
+            requests_data = await self.fetch_all(query, {"user_id": user_id})
+            
+            result = []
+            for request_data in requests_data:
+                request_dict = dict(request_data)
+                
+                # Получаем фотографии
+                photos_query = """
+                    SELECT f.id, f.file_path, f.type, f.name
+                    FROM files f
+                    WHERE f.request_id = :request_id AND f.type = 'photo'
+                    ORDER BY f.uploaded_at
+                """
+                photos = await self.fetch_all(photos_query, {"request_id": request_dict["id"]})
+                
+                # Получаем видео (если есть)
+                video_query = """
+                    SELECT f.id, f.file_path, f.type, f.name
+                    FROM files f
+                    WHERE f.request_id = :request_id AND f.type = 'video'
+                    ORDER BY f.uploaded_at
+                    LIMIT 1
+                """
+                video_data = await self.fetch_one(video_query, {"request_id": request_dict["id"]})
+                
+                # Добавляем данные о медиафайлах
+                request_dict["photos"] = [dict(photo) for photo in photos] if photos else []
+                
+                # Преобразуем видео в нужный формат, если оно есть
+                if video_data:
+                    video_dict = dict(video_data)
+                    request_dict["video"] = {
+                        "file_id": video_dict.get("id"),
+                        "file_path": video_dict.get("file_path"),
+                        "storage_path": video_dict.get("file_path")
+                    }
+                else:
+                    request_dict["video"] = None
+                
+                result.append(request_dict)
+            
+            return result
+        
+        except Exception as e:
+            logging.error(f"Ошибка при получении заявок пользователя: {e}")
+            return []
+            
+    @staticmethod
+    async def get_user_requests_static(user_id: int) -> list:
+        """
+        Статический метод для получения заявок пользователя.
+        
+        Args:
+            user_id (int): ID пользователя-создателя
+            
+        Returns:
+            list: Список словарей с информацией о заявках
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.get_user_requests(user_id)
+        except Exception as e:
+            logging.error(f"Error in get_user_requests_static: {str(e)}")
+            return []
+            
+    async def delete_request(self, request_id: int) -> bool:
+        """
+        Удаляет заявку из базы данных.
+        
+        Args:
+            request_id (int): ID заявки для удаления
+            
+        Returns:
+            bool: True если удаление прошло успешно, иначе False
+        """
+        try:
+            # Сначала удаляем связанные файлы
+            delete_files_query = """
+                DELETE FROM files
+                WHERE request_id = :request_id
+            """
+            await self.execute_query(delete_files_query, {"request_id": request_id})
+            
+            # Затем удаляем саму заявку
+            delete_query = """
+                DELETE FROM requests
                 WHERE id = :request_id
             """
-            await DBService.execute(query, {"request_id": request_id, "status": status})
+            await self.execute_query(delete_query, {"request_id": request_id})
+            
+            # Коммитим транзакцию
+            await self.commit()
+            
+            return True
+            
+        except Exception as e:
+            # Выполняем откат транзакции при ошибке
+            await self.rollback()
+            logging.error(f"Error deleting request {request_id}: {str(e)}")
+            return False
+            
+    @staticmethod
+    async def delete_request_static(request_id: int) -> bool:
+        """
+        Статический метод для удаления заявки.
+        
+        Args:
+            request_id (int): ID заявки для удаления
+            
+        Returns:
+            bool: True если удаление прошло успешно, иначе False
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.delete_request(request_id)
+        except Exception as e:
+            logging.error(f"Error in delete_request_static: {str(e)}")
+            return False
+            
+    async def reapply_request(self, request_id: int) -> bool:
+        """
+        Отправляет отклоненную заявку на повторную проверку.
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            bool: True если операция прошла успешно, иначе False
+        """
+        try:
+            update_query = """
+                UPDATE requests
+                SET status = 'pending', rejection_reason = NULL
+                WHERE id = :request_id AND status = 'rejected'
+            """
+            await self.execute_query(update_query, {"request_id": request_id})
+            
+            # Коммитим транзакцию
+            await self.commit()
+            
+            return True
+            
+        except Exception as e:
+            # Выполняем откат транзакции при ошибке
+            await self.rollback()
+            logging.error(f"Error reapplying request {request_id}: {str(e)}")
+            return False
+            
+    @staticmethod
+    async def reapply_request_static(request_id: int) -> bool:
+        """
+        Статический метод для отправки заявки на повторную проверку.
+        
+        Args:
+            request_id (int): ID заявки
+            
+        Returns:
+            bool: True если операция прошла успешно, иначе False
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                return await db_service.reapply_request(request_id)
+        except Exception as e:
+            logging.error(f"Error in reapply_request_static: {str(e)}")
+            return False
 
     @staticmethod
     async def create_matches_for_request(request_id: int) -> list:
