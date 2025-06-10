@@ -20,7 +20,7 @@ from app.keyboards.inline import (
     get_main_user_menu_keyboard,
     get_back_keyboard
 )
-from app.utils.message_utils import remove_keyboard_from_context, send_supplier_card
+from app.utils.message_utils import remove_keyboard_from_context, send_supplier_card, remove_previous_keyboard
 from app.config.config import get_admin_chat_id
 from app.config.action_config import get_action_config
 from app.config.logging import app_logger
@@ -591,9 +591,26 @@ async def prev_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
 async def back_to_subcategories(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработчик для возврата к выбору подкатегории"""
     await callback.answer()
-    
-    # Получаем данные из состояния
+
+    # Удаляем клавиатуру у карточки поставщика и у сообщения-носителя клавиатуры
     state_data = await state.get_data()
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    chat_id = callback.message.chat.id
+    # Удаляем клавиатуру у сообщения-носителя, если оно не входит в media_message_ids
+    if keyboard_message_id and keyboard_message_id not in media_message_ids:
+        try:
+            await remove_previous_keyboard(bot, keyboard_message_id, chat_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении клавиатуры у сообщения-носителя {keyboard_message_id}: {e}")
+    # Удаляем клавиатуру у медиа-сообщений (например, у одиночного фото)
+    for msg_id in media_message_ids:
+        try:
+            await remove_previous_keyboard(bot, msg_id, chat_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении клавиатуры у медиа сообщения {msg_id}: {e}")
+
+    # Получаем данные из состояния
     main_category = state_data.get("main_category", "")
     
     # Возвращаемся к выбору подкатегории

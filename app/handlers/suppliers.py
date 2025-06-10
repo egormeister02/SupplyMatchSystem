@@ -314,6 +314,11 @@ async def process_region(message: Message, state: FSMContext, bot: Bot):
     
     # Переходим к вводу города
     city_config = get_state_config(SupplierCreationStates.waiting_city)
+
+    await message.answer(
+        city_config["text"],
+        reply_markup=city_config.get("markup")
+    )
     
     await state.set_state(SupplierCreationStates.waiting_city)
 

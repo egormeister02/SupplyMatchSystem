@@ -10,9 +10,10 @@ from app.keyboards.inline import (
     get_back_button,
 )
 
-from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates, MyRequestStates
+from app.states.states import RegistrationStates, SupplierCreationStates, SupplierSearchStates, RequestCreationStates, MySupplierStates, MyRequestStates, ReviewStates
 from app.services import get_db_session, DBService
 import logging
+from aiogram.fsm.state import State, StatesGroup
 
 # Вспомогательные функции для формирования текстов
 def format_numbered_list(items, start_text="", item_formatter=lambda i, idx: f"{idx}. {i}"):
@@ -632,6 +633,43 @@ my_request_config = {
     },
 }
 
+
+review_states_config = {
+    ReviewStates.waiting_mark: {
+        "text": "Поставьте оценку поставщику:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="1", callback_data="review_mark:1"),
+                 InlineKeyboardButton(text="2", callback_data="review_mark:2"),
+                 InlineKeyboardButton(text="3", callback_data="review_mark:3"),
+                 InlineKeyboardButton(text="4", callback_data="review_mark:4"),
+                 InlineKeyboardButton(text="5", callback_data="review_mark:5")],
+                [InlineKeyboardButton(text="Назад к поставщику", callback_data="back_to_viewing_request_suppliers")]
+            ]
+        ),
+        "back_state": MyRequestStates.viewing_request_suppliers,
+    },
+    ReviewStates.waiting_text: {
+        "text": "Напишите текст отзыва:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [get_back_button("waiting_mark", is_state=True, button_text="Назад к оценке", state_group="ReviewStates")]
+            ]
+        ),
+        "back_state": ReviewStates.waiting_mark,
+    },
+    ReviewStates.confirm: {
+        "text": "Проверьте ваш отзыв и подтвердите отправку:",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Отправить", callback_data="review_send")],
+                [get_back_button("waiting_text", is_state=True, button_text="Назад к тексту", state_group="ReviewStates")]
+            ]
+        ),
+        "back_state": ReviewStates.waiting_text,
+    },
+}
+
 # Функция получения конфигурации для состояния
 def get_state_config(state):
     """
@@ -657,6 +695,10 @@ def get_state_config(state):
         config = my_supplier_config[state]
     elif state in my_request_config:
         config = my_request_config[state]
+    elif state in review_states_config:
+        config = review_states_config[state]
+    elif state in review_states_config:
+        config = review_states_config[state]
         
     return config
 

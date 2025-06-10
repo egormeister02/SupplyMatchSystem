@@ -73,29 +73,3 @@ def get_action_config(action):
     return None
 
 # Обновление маркапов после создания функций в inline.py
-def update_action_markups():
-    """Обновляет маркапы для действий после инициализации функций в inline.py"""
-    # Убедимся, что импорты успешно загружены
-    try:
-        from app.keyboards.inline import get_back_keyboard, get_keyboard_with_back
-        
-        # Обновляем маркапы для действий, где они не заданы
-        for action_name, config in action_config.items():
-            if config.get("markup") is None and config.get("parent") is not None:
-                parent = config.get("parent")
-                config["markup"] = get_back_keyboard(parent, is_state=False)
-        
-        # Обновляем маркап для suppliers_list с кнопками категорий
-        if "suppliers_list" in action_config:
-            action_config["suppliers_list"]["markup"] = get_keyboard_with_back(
-                [
-                    InlineKeyboardButton(text="Электроника", callback_data="suppliers_electronics"),
-                    InlineKeyboardButton(text="Продукты питания", callback_data="suppliers_food"),
-                ],
-                back_target="main_menu",
-                is_state=False,
-                row_width=1
-            )
-    except ImportError:
-        # Импорты еще не доступны, это нормально при первой загрузке
-        pass 

@@ -998,7 +998,14 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
             
             # Сохраняем ID сообщения с карточкой в состоянии для последующего редактирования
             if request_message:
-                await state.update_data(card_message_id=request_message.message_id)
+                # Проверяем тип возвращаемого значения и корректно получаем ID сообщения
+                if isinstance(request_message, dict):
+                    # Если это словарь, получаем ID сообщения с клавиатурой
+                    await state.update_data(card_message_id=request_message.get("keyboard_message_id"))
+                    await state.update_data(keyboard_message_id=request_message.get("keyboard_message_id"))
+                else:
+                    # Если это сообщение, получаем его ID напрямую
+                    await state.update_data(card_message_id=request_message.message_id)
             
             logger.info(f"Карточка заявки {request_id} отправлена администратору {admin_id}")
             

@@ -72,3 +72,7 @@ class MyRequestStates(StatesGroup):
     editing_request = State()      # Редактирование заявки
     selecting_attribute = State()  # Выбор атрибута для редактирования
 
+class ReviewStates(StatesGroup):
+    waiting_mark = State()
+    waiting_text = State()
+    confirm = State()

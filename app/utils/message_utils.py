@@ -4,7 +4,7 @@ Utility functions for message operations
 
 from typing import Union, Optional
 from aiogram import Bot
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types.input_file import FSInputFile
 from aiogram.types import InputMediaPhoto, InputMediaVideo
 from aiogram.exceptions import TelegramAPIError
@@ -343,6 +343,20 @@ async def send_supplier_card(
             
             # Для медиагруппы отправляем клавиатуру отдельным сообщением
             if keyboard:
+                supplier_id = supplier.get('id')
+                if isinstance(keyboard, InlineKeyboardMarkup):
+                    # Копируем существующую клавиатуру
+                    new_keyboard = []
+                    # Кнопка "Посмотреть отзывы"
+                    review_button = InlineKeyboardButton(
+                        text="Посмотреть отзывы",
+                        callback_data=f"show_reviews:{supplier_id}"
+                    )
+                    new_keyboard.append([review_button])
+                    # Добавляем остальные кнопки
+                    for row in keyboard.inline_keyboard:
+                        new_keyboard.append(row)
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
                 keyboard_message = await bot.send_message(
                     chat_id=chat_id,
                     text="Используйте кнопки для навигации:",
@@ -763,3 +777,63 @@ async def send_request_card(
         result["keyboard_message_id"] = message.message_id
         result["media_message_ids"] = [message.message_id]
         return result
+
+async def send_review_card(
+    bot: Bot,
+    chat_id: int,
+    reviews: list,
+    current_index: int,
+    keyboard: Optional[InlineKeyboardMarkup] = None,
+    message_id: Optional[int] = None
+) -> int:
+    """
+    Отправляет или редактирует карточку отзыва с навигацией и кнопкой назад.
+    Возвращает message_id отправленного или отредактированного сообщения.
+    """
+    if not reviews:
+        text = "Отзывов пока нет."
+    else:
+        review = reviews[current_index]
+        mark = review['mark']
+        # Эмоджи по оценке
+        mark_emoji = {
+            1: '😡',
+            2: '😞',
+            3: '😐',
+            4: '🙂',
+            5: '🤩',
+        }.get(mark, '⭐')
+        text = f"{mark_emoji} Оценка: {mark}\n\n" \
+               f"{review['text']}\n\n" \
+               f"Дата: {review['created_at'].strftime('%d.%m.%Y %H:%M') if hasattr(review['created_at'], 'strftime') else review['created_at']}\n"
+
+    # Кнопки навигации и назад
+    nav_buttons = []
+    if reviews and len(reviews) > 1:
+        nav_row = []
+        if current_index > 0:
+            nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"review_prev:{current_index-1}"))
+        nav_row.append(InlineKeyboardButton(text=f"{current_index+1}/{len(reviews)}", callback_data="review_current"))
+        if current_index < len(reviews)-1:
+            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"review_next:{current_index+1}"))
+        nav_buttons.append(nav_row)
+    # Кнопка назад
+    nav_buttons.append([InlineKeyboardButton(text="Назад", callback_data="review_back")])
+    # Собираем клавиатуру
+    markup = InlineKeyboardMarkup(inline_keyboard=nav_buttons)
+
+    # Если передан message_id, пробуем редактировать сообщение
+    if message_id:
+        from app.utils.message_utils import edit_message_text_and_keyboard
+        result = await edit_message_text_and_keyboard(
+            bot=bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=markup
+        )
+        if result:
+            return message_id
+    # Если не удалось отредактировать или message_id не передан, отправляем новое сообщение
+    msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+    return msg.message_id

@@ -59,7 +59,7 @@ CREATE TABLE requests (
     contact_phone VARCHAR(255),
     contact_email VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+    status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected', 'closed')) DEFAULT 'pending',
     rejection_reason TEXT,
     verified_by_id BIGINT,
     FOREIGN KEY (created_by_id) REFERENCES users(tg_id) ON DELETE SET NULL,
@@ -117,12 +117,11 @@ CREATE TABLE help_requests (
 -- Create reviews table
 CREATE TABLE reviews (
     id SERIAL PRIMARY KEY,
-    match_id INTEGER,
     author_id BIGINT,
     review_id BIGINT,
+    mark INTEGER CHECK (mark >= 1 AND mark <= 5),
     review TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
-    FOREIGN KEY (match_id) REFERENCES matches(id),
-    FOREIGN KEY (author_id) REFERENCES users(tg_id),
-    FOREIGN KEY (review_id) REFERENCES users(tg_id)
+    FOREIGN KEY (author_id) REFERENCES requests(id),
+    FOREIGN KEY (review_id) REFERENCES suppliers(id)
 ); 

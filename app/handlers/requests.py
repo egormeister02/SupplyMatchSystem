@@ -58,7 +58,14 @@ async def check_if_editing(message: Message, state: FSMContext, attribute_name: 
         # Удаляем флаг редактирования, чтобы избежать зацикливания
         await state.update_data(editing_attribute=None)
         
-        # Возвращаемся к подтверждению
+        # Проверяем, было ли редактирование из раздела "Мои заявки"
+        if state_data.get("from_my_requests"):
+            # Используем восстановление карточки заявки
+            from app.handlers.my_requests import restore_request_card
+            await restore_request_card(message, state, bot)
+            return True
+        
+        # Стандартный путь: возвращаемся к подтверждению
         await show_request_confirmation(message, state, bot)
         return True
     return False
@@ -667,6 +674,14 @@ async def show_request_confirmation(message: Message, state: FSMContext, bot: Bo
     # Получаем данные из состояния
     state_data = await state.get_data()
     
+    # Проверяем, был ли вызван из раздела "Мои заявки"
+    from_my_requests = state_data.get("from_my_requests", False)
+    if from_my_requests:
+        # Используем восстановление карточки заявки вместо показа подтверждения
+        from app.handlers.my_requests import restore_request_card
+        await restore_request_card(message, state, bot)
+        return
+    
     # Создаем текст подтверждения
     confirmation_text = "Пожалуйста, проверьте введенные данные заявки:\n\n"
     confirmation_text += f"Категория: {state_data.get('main_category', '')}\n"
@@ -820,7 +835,17 @@ async def back_to_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot):
     # Удаляем клавиатуру у текущего сообщения
     await remove_keyboard_from_context(bot, callback)
     
-    # Переходим к подтверждению создания заявки
+    # Получаем данные из состояния
+    state_data = await state.get_data()
+    from_my_requests = state_data.get("from_my_requests", False)
+    
+    # Если редактирование было из раздела "Мои заявки", возвращаем карточку
+    if from_my_requests:
+        from app.handlers.my_requests import restore_request_card
+        await restore_request_card(callback.message, state, bot)
+        return
+    
+    # Стандартный путь - возвращаемся к подтверждению создания заявки
     await show_request_confirmation(callback.message, state, bot)
 
 @router.callback_query(RequestCreationStates.confirm_request_creation, F.data == "confirm_request")

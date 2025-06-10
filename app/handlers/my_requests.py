@@ -638,6 +638,50 @@ async def edit_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
             await callback.message.answer("Ошибка: не удалось получить информацию о заявке")
             return
         
+        # Получаем данные существующей карточки для последующего восстановления
+        state_data = await state.get_data()
+        keyboard_message_id = state_data.get("keyboard_message_id")
+        media_message_ids = state_data.get("media_message_ids", [])
+        user_requests = state_data.get("user_requests", [])
+        current_index = state_data.get("current_index", 0)
+        
+        # Сохраняем данные карточки для восстановления после редактирования
+        await state.update_data(
+            # Сохраняем данные для восстановления карточки
+            saved_keyboard_message_id=keyboard_message_id,
+            saved_media_message_ids=media_message_ids,
+            saved_user_requests=user_requests,
+            saved_current_index=current_index,
+            saved_request_id=request_id
+        )
+        
+        # Удаляем клавиатуру у карточки заявки и у сообщения-носителя клавиатуры
+        try:
+            # Проверяем, есть ли отдельное сообщение с клавиатурой
+            if keyboard_message_id and keyboard_message_id not in media_message_ids:
+                # Удаляем клавиатуру у сообщения-носителя
+                await bot.edit_message_reply_markup(
+                    chat_id=callback.message.chat.id, 
+                    message_id=keyboard_message_id,
+                    reply_markup=None
+                )
+                app_logger.info(f"Удалена клавиатура у сообщения-носителя {keyboard_message_id}")
+            
+            # Если у медиа сообщений есть клавиатура (например, у одиночного фото)
+            for msg_id in media_message_ids:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=callback.message.chat.id, 
+                        message_id=msg_id,
+                        reply_markup=None
+                    )
+                    app_logger.info(f"Удалена клавиатура у медиа сообщения {msg_id}")
+                except Exception as e:
+                    # Игнорируем ошибки, если клавиатуры нет
+                    pass
+        except Exception as e:
+            app_logger.error(f"Ошибка при удалении клавиатуры: {e}")
+        
         # Сохраняем данные заявки в состояние для редактирования
         await state.update_data(
             # Основные данные
@@ -669,20 +713,6 @@ async def edit_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
             user_id=callback.from_user.id
         )
         
-        # Удаляем сообщения с карточкой заявки
-        state_data = await state.get_data()
-        keyboard_message_id = state_data.get("keyboard_message_id")
-        media_message_ids = state_data.get("media_message_ids", [])
-        
-        try:
-            for msg_id in media_message_ids:
-                await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
-            
-            if keyboard_message_id and keyboard_message_id not in media_message_ids:
-                await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
-        except Exception as e:
-            app_logger.error(f"Ошибка при удалении сообщений карточки: {e}")
-        
         # Сразу переходим к выбору атрибута для редактирования, минуя шаг подтверждения
         # Получаем конфигурацию для выбора атрибута
         from app.states.state_config import get_state_config
@@ -713,6 +743,84 @@ async def edit_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
         await callback.message.answer(
             "Произошла ошибка при подготовке к редактированию заявки. Пожалуйста, попробуйте позже."
         )
+
+# Функция восстановления карточки заявки после редактирования
+async def restore_request_card(message: Message, state: FSMContext, bot: Bot):
+    """
+    Восстанавливает карточку заявки после редактирования.
+    Используется при возврате в раздел "Мои заявки".
+    
+    Args:
+        message: Объект сообщения
+        state: Контекст состояния
+        bot: Объект бота
+    """
+    try:
+        # Получаем данные из состояния
+        state_data = await state.get_data()
+        
+        # Получаем обновленные данные заявки из БД
+        request_id = state_data.get("saved_request_id")
+        if not request_id:
+            app_logger.error("Не найден ID заявки для восстановления карточки")
+            await message.answer("Произошла ошибка при возврате к просмотру заявки. Пожалуйста, вернитесь в раздел 'Мои заявки'.")
+            return
+            
+        request_data = await DBService.get_request_by_id_static(request_id)
+        if not request_data:
+            app_logger.error(f"Не удалось получить данные заявки {request_id} для восстановления карточки")
+            await message.answer("Произошла ошибка при возврате к просмотру заявки. Пожалуйста, вернитесь в раздел 'Мои заявки'.")
+            return
+        
+        # Обновляем список заявок пользователя
+        requests = await DBService.get_user_requests_static(state_data.get("user_id"))
+        
+        # Находим индекс текущей заявки в списке
+        current_index = 0
+        for i, req in enumerate(requests):
+            if req["id"] == request_id:
+                current_index = i
+                break
+        
+        # Устанавливаем состояние просмотра заявок
+        await state.set_state(MyRequestStates.viewing_requests)
+        
+        # Обновляем данные в состоянии
+        await state.update_data(
+            user_requests=requests,
+            current_index=current_index
+        )
+        
+        # Сообщаем об успешном обновлении
+        await message.answer("Данные заявки успешно обновлены!")
+        
+        # Создаем клавиатуру
+        keyboard = create_request_navigation_keyboard(request_data, current_index, len(requests))
+        
+        # Получаем количество откликов на заявку, если она одобрена
+        matches_count = None
+        if request_data.get("status") == "approved":
+            matches_count = await DBService.get_matches_count_for_request(request_id)
+        
+        # Отправляем карточку заявки
+        result = await send_request_card(
+            bot=bot,
+            chat_id=message.chat.id,
+            request=request_data,
+            keyboard=keyboard,
+            show_status=True,
+            matches_count=matches_count
+        )
+        
+        # Обновляем ID сообщений в состоянии
+        await state.update_data(
+            keyboard_message_id=result.get("keyboard_message_id"),
+            media_message_ids=result.get("media_message_ids", [])
+        )
+    
+    except Exception as e:
+        app_logger.error(f"Ошибка при восстановлении карточки заявки: {e}")
+        await message.answer("Произошла ошибка при возврате к просмотру заявки. Пожалуйста, вернитесь в раздел 'Мои заявки'.")
 
 # Обработчик для кнопки с текущим индексом заявки
 @router.callback_query(MyRequestStates.viewing_requests, F.data == "current_my_request")
@@ -777,7 +885,7 @@ async def view_request_suppliers(callback: CallbackQuery, state: FSMContext, bot
         app_logger.error(f"Общая ошибка при удалении сообщений карточки: {e}")
     
     # Создаем клавиатуру для навигации по откликам
-    keyboard = create_supplier_response_keyboard(supplier, current_index, len(suppliers), request_id)
+    keyboard = create_supplier_response_keyboard(supplier, current_index, len(suppliers), request_id, can_write_review=True)
     
     # Отправляем карточку поставщика
     from app.utils.message_utils import send_supplier_card
@@ -795,16 +903,15 @@ async def view_request_suppliers(callback: CallbackQuery, state: FSMContext, bot
     )
 
 # Функция для создания клавиатуры навигации по откликам
-def create_supplier_response_keyboard(supplier, current_index, total_count, request_id):
+def create_supplier_response_keyboard(supplier, current_index, total_count, request_id, can_write_review=False):
     """
     Создает клавиатуру для навигации по откликам
-    
     Args:
         supplier (dict): Данные поставщика
         current_index (int): Текущий индекс в списке
         total_count (int): Общее количество поставщиков
         request_id (int): ID заявки
-        
+        can_write_review (bool): Можно ли писать отзыв
     Returns:
         InlineKeyboardMarkup: Клавиатура для навигации
     """
@@ -814,15 +921,17 @@ def create_supplier_response_keyboard(supplier, current_index, total_count, requ
         InlineKeyboardButton(text=f"{current_index + 1}/{total_count}", callback_data="current_request_supplier"),
         InlineKeyboardButton(text="▶️", callback_data="next_request_supplier")
     ]
-    
     keyboard = []
     keyboard.append(navigation_row)
-    
+    # Кнопка "Написать отзыв"
+    if can_write_review:
+        keyboard.append([
+            InlineKeyboardButton(text="✍️ Написать отзыв", callback_data=f"write_review:{supplier['id']}")
+        ])
     # Добавляем кнопку возврата к заявке
     keyboard.append([
         InlineKeyboardButton(text="↩️ Назад к заявке", callback_data=f"back_to_request:{request_id}")
     ])
-    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Обработчик для кнопки "Следующий поставщик"

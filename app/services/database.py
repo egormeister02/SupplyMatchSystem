@@ -1577,3 +1577,66 @@ class DBService:
         except Exception as e:
             logger.error(f"Ошибка при получении поставщиков для заявки {request_id}: {e}")
             return []
+
+    @staticmethod
+    async def get_reviews_for_supplier(supplier_id: int) -> list:
+        """
+        Получает все отзывы для конкретного поставщика (review_id).
+        Возвращает массив словарей с текстом, оценкой и датой создания.
+        Args:
+            supplier_id (int): ID поставщика (review_id)
+        Returns:
+            list: Список отзывов (словарей с ключами: text, mark, created_at)
+        """
+        query = """
+            SELECT review AS text, mark, created_at
+            FROM reviews
+            WHERE review_id = :supplier_id
+            ORDER BY created_at DESC
+        """
+        try:
+            return await DBService.fetch_data(query, {"supplier_id": supplier_id})
+        except Exception as e:
+            logger.error(f"Ошибка при получении отзывов для поставщика {supplier_id}: {e}")
+            return []
+
+    @staticmethod
+    async def add_review(author_id: int, supplier_id: int, mark: int, text: str) -> bool:
+        """
+        Создает новый отзыв для поставщика и закрывает match.
+        Args:
+            author_id (int): ID пользователя (request_id)
+            supplier_id (int): ID поставщика
+            mark (int): Оценка (1-5)
+            text (str): Текст отзыва
+        Returns:
+            bool: True если успешно, иначе False
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                # Вставляем отзыв
+                query = """
+                    INSERT INTO reviews (author_id, review_id, mark, review, created_at)
+                    VALUES (:author_id, :supplier_id, :mark, :text, NOW())
+                """
+                await db_service.execute_query(query, {
+                    "author_id": author_id,
+                    "supplier_id": supplier_id,
+                    "mark": mark,
+                    "text": text
+                })
+                # Обновляем статус match
+                update_query = """
+                    UPDATE requests
+                    SET status = 'closed'
+                    WHERE id = :request_id
+                """
+                await db_service.execute_query(update_query, {
+                    "request_id": author_id
+                })
+                await db_service.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении отзыва: {e}")
+            return False
