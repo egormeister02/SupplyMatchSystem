@@ -50,6 +50,22 @@ def get_main_user_menu_keyboard():
         ]
     )
 
+def get_main_admin_menu_keyboard():
+    """Main menu for admin with 'Отчет' и командами управления админами"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Поставщики", callback_data="suppliers")],
+            [InlineKeyboardButton(text="Заявки", callback_data="requests_list")],
+            [InlineKeyboardButton(text="Избранное", callback_data="favorites_list")],
+            [InlineKeyboardButton(text="Отчет", callback_data="admin_report")]
+        ]
+    )
+
+def get_main_menu_keyboard_by_role(role):
+    if role == "admin":
+        return get_main_admin_menu_keyboard()
+    return get_main_user_menu_keyboard()
+
 # Универсальные функции для кнопок "Назад"
 
 def get_back_button(back_target, is_state=True, button_text="Назад", state_group=None):

@@ -13,7 +13,7 @@ from app.services import get_db_session, DBService
 from app.utils.message_utils import send_supplier_card
 from app.config.action_config import get_action_config
 from app.config.logging import app_logger
-from app.keyboards.inline import get_back_button, get_main_user_menu_keyboard
+from app.keyboards.inline import get_back_button, get_main_user_menu_keyboard, get_main_menu_keyboard_by_role
 
 # Инициализируем роутер
 router = Router()
@@ -79,50 +79,6 @@ async def show_user_suppliers(user_id: int, chat_id: int, state: FSMContext, bot
             chat_id=chat_id,
             text="Произошла ошибка при загрузке ваших поставщиков. Пожалуйста, попробуйте позже."
         )
-
-@router.message(CommandStart())
-async def cmd_start(message: Message, bot: Bot, state: FSMContext):
-    """Handler for /start command"""
-    app_logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
-    user_id = message.from_user.id
-    
-    # Check if user exists in database
-    user_exists = await DBService.check_user_exists_static(user_id)
-    app_logger.info(f"Пользователь существует: {user_exists}")
-        
-    if user_exists:
-        # User exists, show main menu
-        # Удаляем клавиатуру перед возвратом и сразу удаляем сообщение
-        kb_message = await message.answer("Возвращаемся к меню", reply_markup=ReplyKeyboardRemove())
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=kb_message.message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения: {str(e)}")
-        await message.answer(
-            f"Добро пожаловать в меню, {message.from_user.first_name}! Выберите действие:",
-            reply_markup=get_main_user_menu_keyboard()
-        )
-        # Reset any active states
-        await state.clear()
-    else:
-        # User doesn't exist, start registration
-        await message.answer(
-            "Добро пожаловать! Для начала работы необходимо зарегистрироваться."
-        )
-        
-        # Получаем конфигурацию для состояния ввода имени
-        from app.states.states import RegistrationStates
-        from app.states.state_config import get_state_config
-        
-        first_name_config = get_state_config(RegistrationStates.waiting_first_name)
-        
-        await message.answer(
-            first_name_config["text"],
-            reply_markup=first_name_config.get("markup")
-        )
-        
-        # Set state to waiting for first name
-        await state.set_state(RegistrationStates.waiting_first_name)
 
 # Обработчик для кнопки "Показать моих поставщиков"
 @router.callback_query(F.data == "view_my_suppliers")

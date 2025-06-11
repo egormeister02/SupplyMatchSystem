@@ -17,7 +17,7 @@ from app.services import get_db_session, DBService
 from app.states.states import RegistrationStates, SupplierSearchStates, SupplierCreationStates, RequestCreationStates
 from app.states.state_config import get_state_config
 from app.keyboards.inline import (
-    get_main_user_menu_keyboard,
+    get_main_menu_keyboard_by_role,
     get_back_keyboard
 )
 from app.utils.message_utils import remove_keyboard_from_context, send_supplier_card, remove_previous_keyboard
@@ -41,45 +41,56 @@ def is_valid_email(email):
 # Explicitly set start command handler
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot, state: FSMContext):
-    """Handler for /start command"""
-    app_logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
+    app_logger.info(f"[START] /start called by user {message.from_user.id}")
     user_id = message.from_user.id
     username = message.from_user.username
-    
-    # Check if user exists in database
-    user_exists = await DBService.check_user_exists_static(user_id)
-    app_logger.info(f"Пользователь существует: {user_exists}")
-        
-    if user_exists:
-        # User exists, show main menu
-            # Удаляем клавиатуру перед возвратом и сразу удаляем сообщение
-        kb_message = await message.answer("Возвращаемся к меню", reply_markup=ReplyKeyboardRemove())
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=kb_message.message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения: {str(e)}")
-        await message.answer(
-            f"Добро пожаловать в меню, {message.from_user.first_name}! Выберите действие:",
-            reply_markup=get_main_user_menu_keyboard()
-        )
-        # Reset any active states
-        await state.clear()
-    else:
-        # User doesn't exist, start registration
-        await message.answer(
-            "Добро пожаловать! Для начала работы необходимо зарегистрироваться."
-        )
-        
-        # Получаем конфигурацию для состояния ввода имени
-        first_name_config = get_state_config(RegistrationStates.waiting_first_name)
-        
-        await message.answer(
-            first_name_config["text"],
-            reply_markup=first_name_config.get("markup")
-        )
-        
-        # Set state to waiting for first name
-        await state.set_state(RegistrationStates.waiting_first_name)
+    try:
+        # Check if user exists in database
+        user_exists = await DBService.check_user_exists_static(user_id)
+        app_logger.info(f"[START] user_exists={user_exists}")
+
+        # Получаем роль пользователя (если есть)
+        user_role = None
+        user_data = None
+        if user_exists:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                user_data = await db_service.get_user_by_id(user_id)
+                app_logger.info(f"[START] user_data from DB: {user_data}")
+                user_role = user_data.get("role") if user_data else None
+                app_logger.info(f"[START] user_role={user_role}")
+
+        if user_exists:
+            # User exists, show main menu
+            kb_message = await message.answer("Возвращаемся к меню", reply_markup=ReplyKeyboardRemove())
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=kb_message.message_id)
+            except Exception as e:
+                app_logger.error(f"[START] Ошибка при удалении сообщения: {str(e)}")
+            main_menu_markup = get_main_menu_keyboard_by_role(user_role)
+            app_logger.info(f"[START] Sending main menu, role={user_role}")
+            await message.answer(
+                f"Добро пожаловать в меню, {message.from_user.first_name}! Выберите действие:",
+                reply_markup=main_menu_markup
+            )
+            await state.clear()
+            app_logger.info(f"[START] State cleared for user {user_id}")
+        else:
+            await message.answer(
+                "Добро пожаловать! Для начала работы необходимо зарегистрироваться."
+            )
+            first_name_config = get_state_config(RegistrationStates.waiting_first_name)
+            await message.answer(
+                first_name_config["text"],
+                reply_markup=first_name_config.get("markup")
+            )
+            await state.set_state(RegistrationStates.waiting_first_name)
+            app_logger.info(f"[START] Set state to waiting_first_name for user {user_id}")
+    except Exception as e:
+        app_logger.error(f"[START] Exception in /start: {e}")
+        import traceback
+        app_logger.error(traceback.format_exc())
+        await message.answer("Произошла ошибка при запуске. Пожалуйста, попробуйте позже.")
 
 # Registration flow handlers
 @router.message(RegistrationStates.waiting_first_name)
@@ -265,9 +276,14 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext, bot: 
         await remove_keyboard_from_context(bot, callback)
         
         # Show main menu
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            user_data = await db_service.get_user_by_id(callback.from_user.id)
+            user_role = user_data.get("role") if user_data else None
+        main_menu_markup = get_main_menu_keyboard_by_role(user_role)
         await callback.message.answer(
             "Регистрация успешно завершена! Добро пожаловать!",
-            reply_markup=get_main_user_menu_keyboard()
+            reply_markup=main_menu_markup
         )
         
         # Clear state
@@ -365,12 +381,12 @@ async def handle_suppliers_list(callback: Union[CallbackQuery, Message], bot: Bo
         if is_callback:
             await callback.message.answer(
                 "Произошла ошибка при загрузке категорий. Пожалуйста, попробуйте позже.",
-                reply_markup=get_main_user_menu_keyboard()
+                reply_markup=get_main_menu_keyboard_by_role(None)
             )
         else:
             await callback.answer(
                 "Произошла ошибка при загрузке категорий. Пожалуйста, попробуйте позже.",
-                reply_markup=get_main_user_menu_keyboard()
+                reply_markup=get_main_menu_keyboard_by_role(None)
             )
 
 # Обработчик для всех текстовых сообщений в состоянии ожидания ввода категории
@@ -644,7 +660,7 @@ async def back_to_subcategories(callback: CallbackQuery, state: FSMContext, bot:
         logging.error(f"Ошибка при возврате к подкатегориям: {str(e)}")
         await callback.message.answer(
             "Произошла ошибка при загрузке подкатегорий. Пожалуйста, попробуйте позже.",
-            reply_markup=get_main_user_menu_keyboard()
+            reply_markup=get_main_menu_keyboard_by_role(None)
         )
 
 # Обновляем обработчик для вывода списка поставщиков

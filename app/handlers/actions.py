@@ -13,6 +13,7 @@ from app.config.action_config import get_action_config
 from app.states.states import SupplierCreationStates, RequestCreationStates
 from app.states.state_config import get_state_config
 from app.handlers.my_requests import show_user_requests
+from app.services import get_db_session, DBService
 
 # Инициализируем роутер
 router = Router()
@@ -37,6 +38,12 @@ async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContex
         await callback.message.answer("Неизвестное действие")
         return
     
+    # Получаем роль пользователя
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        user_data = await db_service.get_user_by_id(callback.from_user.id)
+        user_role = user_data.get("role") if user_data else None
+
     try:
         # Получаем информацию о сообщении
         message_id = callback.message.message_id
@@ -58,9 +65,14 @@ async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContex
         logging.info("Создаю новое сообщение и удаляю старое")
         
         # 1. Отправляем новое сообщение
+        markup = action_config.get("markup_func", None)
+        if markup:
+            markup = markup(user_role)
+        else:
+            markup = action_config.get("markup")
         new_message = await callback.message.answer(
             action_config.get("text", "Выполняется действие..."),
-            reply_markup=action_config.get("markup")
+            reply_markup=markup
         )
         logging.info(f"Новое сообщение создано с ID: {new_message.message_id}")
         
@@ -237,6 +249,12 @@ async def handle_back_to_action(callback: CallbackQuery, bot: Bot, state: FSMCon
         await callback.message.answer("Конфигурация для указанного действия не найдена")
         return
     
+    # Получаем роль пользователя
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        user_data = await db_service.get_user_by_id(callback.from_user.id)
+        user_role = user_data.get("role") if user_data else None
+
     try:
         # Получаем информацию о сообщении
         message_id = callback.message.message_id
@@ -245,9 +263,14 @@ async def handle_back_to_action(callback: CallbackQuery, bot: Bot, state: FSMCon
         logging.info(f"Создаю новое сообщение и удаляю старое для действия back_to_action:{target_action}")
         
         # 1. Отправляем новое сообщение
+        markup = action_config.get("markup_func", None)
+        if markup:
+            markup = markup(user_role)
+        else:
+            markup = action_config.get("markup")
         new_message = await callback.message.answer(
             action_config.get("text", "Возврат к предыдущему меню"),
-            reply_markup=action_config.get("markup")
+            reply_markup=markup
         )
         logging.info(f"Новое сообщение создано с ID: {new_message.message_id}")
         

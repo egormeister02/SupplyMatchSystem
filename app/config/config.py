@@ -1,6 +1,7 @@
 from typing import Optional, Any
 from app.config.logging import app_logger
 import os
+import json
 
 # Переменные конфигурации
 ADMIN_GROUP_CHAT_ID = os.environ.get('ADMIN_GROUP_CHAT_ID')
@@ -41,6 +42,27 @@ def update_admin_chat_id(new_chat_id: int) -> bool:
     else:
         app_logger.error(f"Некорректный ID чата: {new_chat_id}")
         return False
+
+def get_admin_ids():
+    """Возвращает список числовых id админов из переменной окружения ADMIN_IDS"""
+    raw = os.environ.get('ADMIN_IDS', '')
+    ids = []
+    try:
+        # Пробуем как json-массив
+        ids = json.loads(raw)
+        if isinstance(ids, list):
+            return [int(i) for i in ids]
+    except Exception:
+        pass
+    # Если не json, пробуем как строку через запятую
+    for part in raw.replace('[','').replace(']','').replace('"','').split(','):
+        part = part.strip()
+        if part:
+            try:
+                ids.append(int(part))
+            except Exception:
+                continue
+    return ids
 
 # Логируем информацию о настройках чата при запуске
 if ADMIN_GROUP_CHAT_ID:

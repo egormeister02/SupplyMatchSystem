@@ -14,9 +14,9 @@ from hypercorn.asyncio import serve
 from app.config import config
 from app.handlers import register_all_handlers
 from app.middlewares import setup_middlewares
-from app.services.database import init_db
-#from app.services.storage import s3_service
+from app.services.database import init_db, engine, DBService
 from app.config.logging import app_logger
+from app.config.config import get_admin_ids
 
 # Логгер для main.py, используем существующую конфигурацию из app.config.logging
 logger = logging.getLogger(__name__)
@@ -48,6 +48,22 @@ async def startup():
         logger.error("Failed to initialize database. Shutting down.")
         os.kill(os.getpid(), signal.SIGTERM)
         return
+    
+    # Присваиваем роль админа пользователям из ADMIN_IDS
+    try:
+        admin_ids = get_admin_ids()
+        if admin_ids:
+            async with engine.begin() as conn:
+                from sqlalchemy import text
+                await conn.execute(
+                    text("UPDATE users SET role = 'admin' WHERE tg_id = ANY(:admin_ids)"),
+                    {"admin_ids": admin_ids}
+                )
+            app_logger.info(f"Admin roles assigned to: {admin_ids}")
+        else:
+            app_logger.info("No admin IDs found for role assignment.")
+    except Exception as e:
+        app_logger.error(f"Failed to assign admin roles: {e}")
     
     # Инициализация конфигурации действий
     try:

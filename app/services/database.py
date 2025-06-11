@@ -1742,3 +1742,16 @@ class DBService:
         except Exception as e:
             logging.error(f"Error in add_to_favorites_static: {str(e)}")
             return 'error'
+
+    async def assign_admin_roles(self, admin_ids: list):
+        """Назначает роль 'admin' всем пользователям из списка admin_ids"""
+        if not admin_ids:
+            return
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    UPDATE users SET role = 'admin' WHERE tg_id = ANY(:admin_ids)
+                """),
+                {"admin_ids": admin_ids}
+            )

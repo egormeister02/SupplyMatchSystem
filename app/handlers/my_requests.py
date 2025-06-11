@@ -12,7 +12,7 @@ from app.services import get_db_session, DBService
 from app.utils.message_utils import send_request_card
 from app.config.action_config import get_action_config
 from app.config.logging import app_logger
-from app.keyboards.inline import get_back_button, get_main_user_menu_keyboard
+from app.keyboards.inline import get_back_button, get_main_user_menu_keyboard, get_main_menu_keyboard_by_role
 from app.states.state_config import get_state_config
 
 # Инициализируем роутер
@@ -370,11 +370,15 @@ async def delete_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
             )
             await state.clear()
             
-            # Показываем меню заявок
-            action_config = get_action_config("my_requests")
+            # Получаем роль пользователя
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                user_data = await db_service.get_user_by_id(callback.from_user.id)
+                user_role = user_data.get("role") if user_data else None
+            main_menu_markup = get_main_menu_keyboard_by_role(user_role)
             await callback.message.answer(
-                action_config["text"],
-                reply_markup=action_config["markup"]
+                "Выберите действие:",
+                reply_markup=main_menu_markup
             )
             return
             

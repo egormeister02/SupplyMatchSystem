@@ -11,7 +11,7 @@ log_dir.mkdir(exist_ok=True)
 log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Определяем режим работы (разработка или продакшен)
-is_development = os.getenv("APP_ENV", "development").lower() == "development"
+is_development = os.getenv("APP_ENV", "local").lower() == "local"
 
 # Проверка, были ли обработчики уже настроены
 root_logger = logging.getLogger()

@@ -11,14 +11,20 @@ from app.keyboards.inline import (
     get_back_keyboard,
     get_keyboard_with_back,
     get_back_button,
-    get_main_user_menu_keyboard
+    get_main_user_menu_keyboard,
+    get_main_admin_menu_keyboard
 )
+
+def get_main_menu_keyboard_by_role(role):
+    if role == "admin":
+        return get_main_admin_menu_keyboard()
+    return get_main_user_menu_keyboard()
 
 # Конфигурация действий меню
 action_config = {
     "main_menu": {
         "text": "Главное меню. Выберите нужный раздел:",
-        "markup": get_main_user_menu_keyboard(),
+        "markup_func": get_main_menu_keyboard_by_role,
         "parent": None,  # У главного меню нет родителя
     },
     
@@ -37,7 +43,7 @@ action_config = {
     
     "favorites_list": {
         "text": "Главное меню",
-        "markup": get_main_user_menu_keyboard(),
+        "markup_func": get_main_menu_keyboard_by_role,
         "parent": "main_menu",
     },
 
@@ -62,7 +68,7 @@ action_config = {
         "text": "Добро пожаловать в раздел помощи!\n\n"
                 "Здесь вы можете найти ответы на часто задаваемые вопросы и инструкции по использованию нашего бота.\n\n"
                 "Если у вас остались вопросы, обратитесь к администратору.",
-        "markup": get_main_user_menu_keyboard()
+        "markup_func": get_main_menu_keyboard_by_role
     }
 }
 
@@ -73,3 +79,7 @@ def get_action_config(action):
     return None
 
 # Обновление маркапов после создания функций в inline.py
+
+def update_action_markups():
+    # Stub for backward compatibility
+    pass

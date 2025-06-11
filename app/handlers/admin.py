@@ -14,6 +14,50 @@ from app.services import get_db_session, DBService, admin_chat_service
 from app.utils.message_utils import send_supplier_card
 from app.config import config
 from app.services.notification_queue import notification_queue_service
+import json
+import os
+
+def get_admin_ids():
+    raw = os.environ.get('ADMIN_IDS', '')
+    ids = []
+    try:
+        ids = json.loads(raw)
+        if isinstance(ids, list):
+            return [int(i) for i in ids]
+    except Exception:
+        pass
+    for part in raw.replace('[','').replace(']','').replace('"','').split(','):
+        part = part.strip()
+        if part:
+            try:
+                ids.append(int(part))
+            except Exception:
+                continue
+    return ids
+
+def write_env_variable(key, value):
+    """Записывает переменную key=value в нужный .env файл в зависимости от APP_ENV"""
+    app_env = os.environ.get("APP_ENV", "local").lower()
+    if app_env == "production":
+        env_file = ".env.prod"
+    elif app_env == "local":
+        env_file = ".env.local"
+    else:
+        env_file = ".env"
+    lines = []
+    if os.path.exists(env_file):
+        with open(env_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    found = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith(f"{key}="):
+            lines[i] = f"{key}={value}\n"
+            found = True
+            break
+    if not found:
+        lines.append(f"{key}={value}\n")
+    with open(env_file, "w", encoding="utf-8") as f:
+        f.writelines(lines)
 
 # Инициализируем роутер
 router = Router()
@@ -798,18 +842,15 @@ async def set_admin_chat(message: Message, bot: Bot):
     Обработчик команды /setadminchat для установки текущего чата как админского
     или указанного ID чата, если он передан в параметрах
     """
-    # Проверяем, является ли пользователь админом
-    admin_ids = []
-    if isinstance(config.ADMIN_IDS, str) and config.ADMIN_IDS:
-        admin_ids = [int(admin_id) for admin_id in config.ADMIN_IDS.split(',') if admin_id.strip()]
-    elif isinstance(config.ADMIN_IDS, list):
-        admin_ids = [int(admin_id) for admin_id in config.ADMIN_IDS if str(admin_id).strip()]
-    
-    if message.from_user.id not in admin_ids and str(message.from_user.id) not in [str(admin_id) for admin_id in admin_ids]:
+    # Проверка прав через БД
+    if not await is_user_admin(message.from_user.id):
         logger.warning(f"Попытка установки админ-чата пользователем без прав: {message.from_user.id}")
         await message.answer("❌ У вас недостаточно прав для выполнения этой команды.")
         return
-    
+    # Проверка: только не приватный чат
+    if message.chat.type == "private":
+        await message.answer("❌ Нельзя установить приватный чат как админский. Используйте команду в группе или супергруппе.")
+        return
     # Получаем аргументы команды
     args = message.text.split(maxsplit=1)
     
@@ -820,6 +861,8 @@ async def set_admin_chat(message: Message, bot: Bot):
             if config.update_admin_chat_id(new_chat_id):
                 # Обновляем ID чата в сервисе
                 admin_chat_service.admin_chat_id = new_chat_id
+                # Записываем переменную в .env
+                write_env_variable("ADMIN_GROUP_CHAT_ID", new_chat_id)
                 
                 await message.answer(
                     f"✅ ID админ-чата успешно обновлен: <code>{new_chat_id}</code>",
@@ -849,6 +892,8 @@ async def set_admin_chat(message: Message, bot: Bot):
         if config.update_admin_chat_id(current_chat_id):
             # Обновляем ID чата в сервисе
             admin_chat_service.admin_chat_id = current_chat_id
+            # Записываем переменную в .env
+            write_env_variable("ADMIN_GROUP_CHAT_ID", current_chat_id)
             
             await message.answer(
                 f"✅ Текущий чат установлен как чат администраторов (ID: <code>{current_chat_id}</code>)",
@@ -1024,6 +1069,7 @@ async def take_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
 async def handle_approve_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработчик принятия заявки администратором"""
     # Извлекаем ID заявки из callback data
+    await callback.answer()
     data = admin_chat_service.parse_admin_callback_data(callback.data)
     request_id = data.get("request_id")
     
@@ -1282,6 +1328,98 @@ async def process_request_rejection_reason(message: Message, state: FSMContext, 
         logger.error(f"Ошибка при отклонении заявки {request_id}: {e}")
         await message.answer(f"Произошла ошибка при отклонении заявки: {str(e)}")
         await state.clear()
+
+async def is_user_admin(user_id):
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        user = await db_service.execute_query(
+            "SELECT role FROM users WHERE tg_id = :user_id",
+            {"user_id": user_id}
+        )
+        row = user.mappings().first() if user else None
+        return row and row.get("role") == "admin"
+
+@router.message(CommandFilter("addadmin"))
+async def add_admin_command(message: Message, bot: Bot):
+    if not await is_user_admin(message.from_user.id):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /addadmin <@username или id>")
+        return
+    username_or_id = args[1].lstrip('@')
+    user_id = None
+    if username_or_id.isdigit():
+        user_id = int(username_or_id)
+    else:
+        username_db = f"@{username_or_id}"
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            user = await db_service.execute_query(
+                "SELECT tg_id FROM users WHERE username = :username",
+                {"username": username_db}
+            )
+            row = user.mappings().first() if user else None
+            if row:
+                user_id = row["tg_id"]
+    if not user_id:
+        await message.answer("❌ Пользователь не найден.")
+        return
+    # Проверяем, не является ли уже админом
+    if await is_user_admin(user_id):
+        await message.answer("Пользователь уже является админом.")
+        return
+    # Обновляем роль только в БД
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        await db_service.execute_query(
+            "UPDATE users SET role = 'admin' WHERE tg_id = :user_id",
+            {"user_id": user_id}
+        )
+        await db_service.commit()
+    await message.answer(f"✅ Пользователь {user_id} добавлен в админы.")
+
+@router.message(CommandFilter("removeadmin"))
+async def remove_admin_command(message: Message, bot: Bot):
+    if not await is_user_admin(message.from_user.id):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /removeadmin <@username или id>")
+        return
+    username_or_id = args[1].lstrip('@')
+    user_id = None
+    if username_or_id.isdigit():
+        user_id = int(username_or_id)
+    else:
+        username_db = f"@{username_or_id}"
+        async with get_db_session() as session:
+            db_service = DBService(session)
+            user = await db_service.execute_query(
+                "SELECT tg_id FROM users WHERE username = :username",
+                {"username": username_db}
+            )
+            row = user.mappings().first() if user else None
+            if row:
+                user_id = row["tg_id"]
+    if not user_id:
+        await message.answer("❌ Пользователь не найден.")
+        return
+    # Проверяем, является ли админом
+    if not await is_user_admin(user_id):
+        await message.answer("Пользователь не является админом.")
+        return
+    # Обновляем роль только в БД
+    async with get_db_session() as session:
+        db_service = DBService(session)
+        await db_service.execute_query(
+            "UPDATE users SET role = 'user' WHERE tg_id = :user_id",
+            {"user_id": user_id}
+        )
+        await db_service.commit()
+    await message.answer(f"✅ Пользователь {user_id} удалён из админов.")
 
 def register_handlers(dp):
     """
