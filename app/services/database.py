@@ -1675,3 +1675,70 @@ class DBService:
         except Exception as e:
             logging.error(f"Ошибка при получении закрытого match для заявки {request_id}: {e}")
             return None
+
+    @staticmethod
+    async def get_user_favorites_static(user_id: int) -> list:
+        """
+        Статический метод для получения избранных поставщиков пользователя.
+        Args:
+            user_id (int): ID пользователя
+        Returns:
+            list: Список словарей с информацией о поставщиках
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                # Получаем ID избранных поставщиков
+                query = """
+                    SELECT supplier_id
+                    FROM favorites
+                    WHERE user_id = :user_id
+                    ORDER BY added_at DESC
+                """
+                result = await db_service.execute_query(query, {"user_id": user_id})
+                supplier_ids = [row["supplier_id"] for row in result.mappings().all()]
+                if not supplier_ids:
+                    return []
+                # Получаем полную информацию о каждом поставщике
+                suppliers = []
+                for supplier_id in supplier_ids:
+                    supplier = await db_service.get_supplier_by_id(supplier_id)
+                    if supplier:
+                        suppliers.append(supplier)
+                return suppliers
+        except Exception as e:
+            logging.error(f"Error in get_user_favorites_static: {str(e)}")
+            return []
+
+    @staticmethod
+    async def add_to_favorites_static(user_id: int, supplier_id: int) -> str:
+        """
+        Добавляет поставщика в избранное пользователя, если его там ещё нет.
+        Args:
+            user_id (int): ID пользователя
+            supplier_id (int): ID поставщика
+        Returns:
+            str: 'already_exists' если уже в избранном, 'added' если успешно добавлен, 'error' при ошибке
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                # Проверяем, есть ли уже такой поставщик в избранном
+                check_query = """
+                    SELECT 1 FROM favorites WHERE user_id = :user_id AND supplier_id = :supplier_id
+                """
+                result = await db_service.execute_query(check_query, {"user_id": user_id, "supplier_id": supplier_id})
+                exists = result.first() is not None
+                if exists:
+                    return 'already_exists'
+                # Добавляем в избранное
+                insert_query = """
+                    INSERT INTO favorites (user_id, supplier_id)
+                    VALUES (:user_id, :supplier_id)
+                """
+                await db_service.execute_query(insert_query, {"user_id": user_id, "supplier_id": supplier_id})
+                await db_service.commit()
+                return 'added'
+        except Exception as e:
+            logging.error(f"Error in add_to_favorites_static: {str(e)}")
+            return 'error'

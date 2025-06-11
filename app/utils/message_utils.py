@@ -346,12 +346,16 @@ async def send_supplier_card(
             if isinstance(keyboard, InlineKeyboardMarkup):
                 # Копируем существующую клавиатуру
                 new_keyboard = []
-                # Кнопка 'Посмотреть отзывы'
+                # Кнопки 'Отзывы' и 'В избранное' в одном ряду
                 review_button = InlineKeyboardButton(
-                    text="Посмотреть отзывы",
+                    text="Отзывы",
                     callback_data=f"show_reviews:{supplier_id}"
                 )
-                new_keyboard.append([review_button])
+                favorite_button = InlineKeyboardButton(
+                    text="В избранное",
+                    callback_data=f"add_to_favorites:{supplier_id}"
+                )
+                new_keyboard.append([review_button, favorite_button])
                 # Добавляем остальные кнопки
                 for row in keyboard.inline_keyboard:
                     new_keyboard.append(row)
@@ -457,21 +461,30 @@ async def send_supplier_card(
                 "media_message_ids": []
             }
     else:
-        # Если нет фото и видео, отправляем текстовое сообщение с клавиатурой
+        supplier_id = supplier.get('id')
+        if isinstance(keyboard, InlineKeyboardMarkup):
+            new_keyboard = []
+            review_button = InlineKeyboardButton(
+                text="Отзывы",
+                callback_data=f"show_reviews:{supplier_id}"
+            )
+            favorite_button = InlineKeyboardButton(
+                text="В избранное",
+                callback_data=f"add_to_favorites:{supplier_id}"
+            )
+            new_keyboard.append([review_button, favorite_button])
+            for row in keyboard.inline_keyboard:
+                new_keyboard.append(row)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
         message = await bot.send_message(
             chat_id=chat_id,
             text=text,
-            reply_markup=keyboard  # Прикрепляем клавиатуру сразу к сообщению
+            reply_markup=keyboard
         )
         return {
             "keyboard_message_id": message.message_id,
             "media_message_ids": []
         }
-    
-    return {
-        "keyboard_message_id": None,
-        "media_message_ids": []
-    } 
 
 async def send_request_card(
     bot: Bot,

@@ -750,6 +750,148 @@ async def handle_current_my_supplier(callback: CallbackQuery):
     """
     await callback.answer()
 
+# Функция для создания клавиатуры навигации по избранным поставщикам
+def create_favorite_navigation_keyboard(current_index, total_count):
+    """
+    Создает клавиатуру для навигации по избранным поставщикам (только навигация и назад).
+    Args:
+        current_index (int): Текущий индекс
+        total_count (int): Общее количество
+    Returns:
+        InlineKeyboardMarkup
+    """
+    navigation_row = [
+        InlineKeyboardButton(text="◀️", callback_data="prev_favorite_supplier"),
+        InlineKeyboardButton(text=f"{current_index + 1}/{total_count}", callback_data="current_favorite_supplier"),
+        InlineKeyboardButton(text="▶️", callback_data="next_favorite_supplier")
+    ]
+    keyboard = [navigation_row]
+    keyboard.append([
+        get_back_button("favorites_list", is_state=False, button_text="Назад")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Функция для показа избранных поставщиков пользователя
+async def show_user_favorites(user_id: int, chat_id: int, state: FSMContext, bot: Bot):
+    """
+    Показывает список избранных поставщиков пользователя.
+    """
+    try:
+        from app.services import DBService
+        suppliers = await DBService.get_user_favorites_static(user_id)
+        if not suppliers:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="У вас пока нет избранных поставщиков. Добавьте их через карточки поставщиков."
+            )
+            return
+        await state.update_data(
+            favorite_suppliers=suppliers,
+            favorite_current_index=0
+        )
+        current_index = 0
+        supplier = suppliers[current_index]
+        keyboard = create_favorite_navigation_keyboard(current_index, len(suppliers))
+        result = await send_supplier_card(
+            bot=bot,
+            chat_id=chat_id,
+            supplier=supplier,
+            keyboard=keyboard,
+            show_status=True
+        )
+        await state.update_data(
+            favorite_keyboard_message_id=result.get("keyboard_message_id"),
+            favorite_media_message_ids=result.get("media_message_ids", [])
+        )
+    except Exception as e:
+        app_logger.error(f"Ошибка при получении избранных поставщиков: {e}")
+        await bot.send_message(
+            chat_id=chat_id,
+            text="Произошла ошибка при загрузке ваших избранных поставщиков. Пожалуйста, попробуйте позже."
+        )
+
+# Обработчик для кнопки 'favorites_list'
+@router.callback_query(F.data == "favorites_list")
+async def handle_favorites_list(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        app_logger.warning(f"Не удалось удалить предыдущее сообщение: {e}")
+    await show_user_favorites(
+        user_id=callback.from_user.id,
+        chat_id=callback.message.chat.id,
+        state=state,
+        bot=bot
+    )
+
+# Обработчики навигации по избранным поставщикам
+@router.callback_query(F.data == "next_favorite_supplier")
+async def next_favorite_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    await callback.answer()
+    state_data = await state.get_data()
+    suppliers = state_data.get("favorite_suppliers", [])
+    current_index = state_data.get("favorite_current_index", 0)
+    next_index = (current_index + 1) % len(suppliers)
+    supplier = suppliers[next_index]
+    await state.update_data(favorite_current_index=next_index)
+    keyboard = create_favorite_navigation_keyboard(next_index, len(suppliers))
+    keyboard_message_id = state_data.get("favorite_keyboard_message_id")
+    media_message_ids = state_data.get("favorite_media_message_ids", [])
+    try:
+        for msg_id in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+    except Exception as e:
+        app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard,
+        show_status=True
+    )
+    await state.update_data(
+        favorite_keyboard_message_id=result.get("keyboard_message_id"),
+        favorite_media_message_ids=result.get("media_message_ids", [])
+    )
+
+@router.callback_query(F.data == "prev_favorite_supplier")
+async def prev_favorite_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    await callback.answer()
+    state_data = await state.get_data()
+    suppliers = state_data.get("favorite_suppliers", [])
+    current_index = state_data.get("favorite_current_index", 0)
+    prev_index = (current_index - 1) % len(suppliers)
+    supplier = suppliers[prev_index]
+    await state.update_data(favorite_current_index=prev_index)
+    keyboard = create_favorite_navigation_keyboard(prev_index, len(suppliers))
+    keyboard_message_id = state_data.get("favorite_keyboard_message_id")
+    media_message_ids = state_data.get("favorite_media_message_ids", [])
+    try:
+        for msg_id in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+    except Exception as e:
+        app_logger.error(f"Ошибка при удалении предыдущих сообщений: {e}")
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard,
+        show_status=True
+    )
+    await state.update_data(
+        favorite_keyboard_message_id=result.get("keyboard_message_id"),
+        favorite_media_message_ids=result.get("media_message_ids", [])
+    )
+
+@router.callback_query(F.data == "current_favorite_supplier")
+async def handle_current_favorite_supplier(callback: CallbackQuery):
+    await callback.answer()
+
 # Функция регистрации обработчиков в основном диспетчере
 def register_handlers(dp):
     """Register all handlers from this module"""

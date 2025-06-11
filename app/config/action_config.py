@@ -36,7 +36,7 @@ action_config = {
     },
     
     "favorites_list": {
-        "text": "Раздел избранного (в разработке)",
+        "text": "Главное меню",
         "markup": get_main_user_menu_keyboard(),
         "parent": "main_menu",
     },

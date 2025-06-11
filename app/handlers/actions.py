@@ -17,7 +17,7 @@ from app.handlers.my_requests import show_user_requests
 # Инициализируем роутер
 router = Router()
 
-@router.callback_query(F.data.in_(["suppliers", "requests_list", "favorites_list", "help_action",
+@router.callback_query(F.data.in_(["suppliers", "requests_list", "help_action",
                                "my_suppliers"]))
 async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContext):
     """
@@ -263,6 +263,24 @@ async def handle_back_to_action(callback: CallbackQuery, bot: Bot, state: FSMCon
         await callback.message.answer(
             "Произошла ошибка при выполнении действия. Пожалуйста, попробуйте позже."
         )
+
+@router.callback_query(F.data.startswith("add_to_favorites:"))
+async def handle_add_to_favorites(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    await callback.answer()
+    try:
+        supplier_id = int(callback.data.split(":")[1])
+        user_id = callback.from_user.id
+        from app.services import DBService
+        result = await DBService.add_to_favorites_static(user_id, supplier_id)
+        if result == 'added':
+            await callback.message.answer("Поставщик добавлен в избранное!")
+        elif result == 'already_exists':
+            await callback.message.answer("Этот поставщик уже в избранном.")
+        else:
+            await callback.message.answer("Произошла ошибка при добавлении в избранное. Попробуйте позже.")
+    except Exception as e:
+        logging.error(f"Error in handle_add_to_favorites: {e}")
+        await callback.message.answer("Произошла ошибка при добавлении в избранное. Попробуйте позже.")
 
 # Добавление роутера в основной диспетчер
 def register_handlers(dp):
