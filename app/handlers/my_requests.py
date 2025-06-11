@@ -130,7 +130,7 @@ def create_request_navigation_keyboard(request, current_index, total_count):
         InlineKeyboardButton(text=f"{current_index + 1}/{total_count}", callback_data="current_my_request"),
         InlineKeyboardButton(text="▶️", callback_data="next_my_request")
     ]
-    
+    print(request)
     # Определяем дополнительные кнопки в зависимости от статуса
     status = request.get("status", "pending")
     request_id = request.get("id")
@@ -156,6 +156,11 @@ def create_request_navigation_keyboard(request, current_index, total_count):
         ])
         keyboard.append([
             InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_request:{request_id}")
+        ])
+    elif status == "closed":
+        # Для закрытых заявок - кнопка просмотра поставщика
+        keyboard.append([
+            InlineKeyboardButton(text="Посмотреть поставщика", callback_data=f"view_closed_match_supplier:{request_id}")
         ])
     
     # Добавляем кнопку возврата к меню
@@ -825,10 +830,6 @@ async def restore_request_card(message: Message, state: FSMContext, bot: Bot):
 # Обработчик для кнопки с текущим индексом заявки
 @router.callback_query(MyRequestStates.viewing_requests, F.data == "current_my_request")
 async def handle_current_my_request(callback: CallbackQuery):
-    """
-    Обработчик для кнопки с текущим индексом заявки.
-    Просто отвечает на колбэк без действий, чтобы кнопка не мерцала.
-    """
     await callback.answer()
 
 # Обработчик для просмотра откликов на заявку
@@ -1045,10 +1046,11 @@ async def prev_request_supplier(callback: CallbackQuery, state: FSMContext, bot:
     )
 
 # Обработчик для кнопки "Назад к заявке"
-@router.callback_query(MyRequestStates.viewing_request_suppliers, F.data.startswith("back_to_request:"))
+@router.callback_query(F.data.startswith("back_to_request:"))
 async def back_to_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """
-    Обработчик для возврата к просмотру заявки
+    Универсальный обработчик для возврата к просмотру заявки по кнопке "Назад к заявке".
+    Работает в любом состоянии.
     """
     await callback.answer()
     
@@ -1060,14 +1062,13 @@ async def back_to_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
     keyboard_message_id = state_data.get("keyboard_message_id")
     media_message_ids = state_data.get("media_message_ids", [])
     
-    # Удаляем сообщения с карточкой поставщика
+    # Удаляем сообщения с карточкой поставщика или других экранов
     try:
         for msg_id in media_message_ids:
             try:
                 await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
             except Exception as e:
                 app_logger.error(f"Ошибка при удалении медиа сообщения {msg_id}: {e}")
-        
         if keyboard_message_id and keyboard_message_id not in media_message_ids:
             try:
                 await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
@@ -1077,6 +1078,7 @@ async def back_to_request(callback: CallbackQuery, state: FSMContext, bot: Bot):
         app_logger.error(f"Общая ошибка при удалении сообщений карточки: {e}")
     
     # Получаем информацию о заявке
+    from app.services.database import DBService
     request_data = await DBService.get_request_by_id_static(request_id)
     if not request_data:
         await callback.message.answer("Ошибка: не удалось получить информацию о заявке")
@@ -1134,6 +1136,67 @@ async def handle_current_request_supplier(callback: CallbackQuery):
     Просто отвечает на колбэк без действий, чтобы кнопка не мерцала.
     """
     await callback.answer()
+
+# Обработчик для кнопки "Посмотреть поставщика" для закрытой заявки
+@router.callback_query(MyRequestStates.viewing_requests, F.data.startswith("view_closed_match_supplier:"))
+async def view_closed_match_supplier(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Обработчик для просмотра поставщика, с которым была завершена сделка (match.closed)
+    """
+    await callback.answer()
+    request_id = int(callback.data.split(":")[1])
+    
+    # Получаем match со статусом closed
+    from app.services.database import DBService
+    match = await DBService.get_closed_match_for_request(request_id)
+    if not match:
+        await callback.message.answer("Ошибка: не удалось найти завершённую сделку по заявке.")
+        return
+    supplier_id = match.get("supplier_id")
+    if not supplier_id:
+        await callback.message.answer("Ошибка: не найден поставщик для завершённой сделки.")
+        return
+    # Получаем данные поставщика
+    supplier = await DBService.get_supplier_by_id_static(supplier_id)
+    if not supplier:
+        await callback.message.answer("Ошибка: не удалось получить данные поставщика.")
+        return
+    # Удаляем старые сообщения карточки заявки
+    state_data = await state.get_data()
+    keyboard_message_id = state_data.get("keyboard_message_id")
+    media_message_ids = state_data.get("media_message_ids", [])
+    try:
+        for msg_id in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении медиа сообщения {msg_id}: {e}")
+        if keyboard_message_id and keyboard_message_id not in media_message_ids:
+            try:
+                await bot.delete_message(chat_id=callback.message.chat.id, message_id=keyboard_message_id)
+            except Exception as e:
+                app_logger.error(f"Ошибка при удалении сообщения с клавиатурой {keyboard_message_id}: {e}")
+    except Exception as e:
+        app_logger.error(f"Общая ошибка при удалении сообщений карточки: {e}")
+    # Создаём клавиатуру для просмотра одного поставщика (без кнопки отзыва)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Назад к заявке", callback_data=f"back_to_request:{request_id}")]
+        ]
+    )
+    # Отправляем карточку поставщика
+    from app.utils.message_utils import send_supplier_card
+    result = await send_supplier_card(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        supplier=supplier,
+        keyboard=keyboard
+    )
+    # Сохраняем message_id для дальнейшего использования
+    await state.update_data(
+        keyboard_message_id=result.get("keyboard_message_id"),
+        media_message_ids=result.get("media_message_ids", [])
+    )
 
 # Функция регистрации обработчиков в основном диспетчере
 def register_handlers(dp):

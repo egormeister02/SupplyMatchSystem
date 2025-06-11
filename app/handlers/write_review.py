@@ -70,7 +70,7 @@ async def review_send(callback: CallbackQuery, state: FSMContext):
         if supplier:
             # Get current index for navigation
             current_index = suppliers.index(supplier)
-            keyboard = create_supplier_response_keyboard(supplier, current_index, len(suppliers), request_id, can_write_review=True)
+            keyboard = create_supplier_response_keyboard(supplier, current_index, len(suppliers), request_id, can_write_review=False)
             await send_supplier_card(
                 bot=callback.bot,
                 chat_id=callback.message.chat.id,

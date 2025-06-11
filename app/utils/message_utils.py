@@ -341,22 +341,24 @@ async def send_supplier_card(
             # Сохраняем ID всех сообщений медиагруппы
             media_message_ids = [msg.message_id for msg in media_messages]
             
+            # Готовим клавиатуру с кнопкой 'Посмотреть отзывы' (если это InlineKeyboardMarkup)
+            supplier_id = supplier.get('id')
+            if isinstance(keyboard, InlineKeyboardMarkup):
+                # Копируем существующую клавиатуру
+                new_keyboard = []
+                # Кнопка 'Посмотреть отзывы'
+                review_button = InlineKeyboardButton(
+                    text="Посмотреть отзывы",
+                    callback_data=f"show_reviews:{supplier_id}"
+                )
+                new_keyboard.append([review_button])
+                # Добавляем остальные кнопки
+                for row in keyboard.inline_keyboard:
+                    new_keyboard.append(row)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+
             # Для медиагруппы отправляем клавиатуру отдельным сообщением
             if keyboard:
-                supplier_id = supplier.get('id')
-                if isinstance(keyboard, InlineKeyboardMarkup):
-                    # Копируем существующую клавиатуру
-                    new_keyboard = []
-                    # Кнопка "Посмотреть отзывы"
-                    review_button = InlineKeyboardButton(
-                        text="Посмотреть отзывы",
-                        callback_data=f"show_reviews:{supplier_id}"
-                    )
-                    new_keyboard.append([review_button])
-                    # Добавляем остальные кнопки
-                    for row in keyboard.inline_keyboard:
-                        new_keyboard.append(row)
-                    keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
                 keyboard_message = await bot.send_message(
                     chat_id=chat_id,
                     text="Используйте кнопки для навигации:",
@@ -568,8 +570,18 @@ async def send_request_card(
     # Добавляем информацию о статусе заявки, если запрошено
     if show_status:
         status = request.get('status', 'pending')
-        status_emoji = "✅" if status == "approved" else "❌" if status == "rejected" else "⏳"
-        status_text = "Одобрена" if status == "approved" else "Отклонена" if status == "rejected" else "На проверке"
+        if status == "approved":
+            status_emoji = "✅"
+            status_text = "Одобрена"
+        elif status == "rejected":
+            status_emoji = "❌"
+            status_text = "Отклонена"
+        elif status == "closed":
+            status_emoji = "✅"
+            status_text = "Сделка завершена"
+        else:
+            status_emoji = "⏳"
+            status_text = "На проверке"
         text += f"\n\nСтатус: {status_emoji} {status_text}"
         
         # Если заявка отклонена и есть причина отклонения, показываем её
@@ -679,6 +691,22 @@ async def send_request_card(
             # Сохраняем все ID медиа-сообщений
             result["media_message_ids"] = [msg.message_id for msg in media_messages]
             
+            # Готовим клавиатуру с кнопкой 'Посмотреть отзывы' (если это InlineKeyboardMarkup)
+            supplier_id = request.get('id')
+            if isinstance(keyboard, InlineKeyboardMarkup):
+                # Копируем существующую клавиатуру
+                new_keyboard = []
+                # Кнопка 'Посмотреть отзывы'
+                review_button = InlineKeyboardButton(
+                    text="Посмотреть отзывы",
+                    callback_data=f"show_reviews:{supplier_id}"
+                )
+                new_keyboard.append([review_button])
+                # Добавляем остальные кнопки
+                for row in keyboard.inline_keyboard:
+                    new_keyboard.append(row)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+
             # Для медиагруппы отправляем клавиатуру отдельным сообщением
             if keyboard:
                 keyboard_message = await bot.send_message(

@@ -44,7 +44,7 @@ def get_main_user_menu_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Поставщики", callback_data="suppliers")],
-            [InlineKeyboardButton(text="Запросы", callback_data="requests_list")],
+            [InlineKeyboardButton(text="Заявки", callback_data="requests_list")],
             [InlineKeyboardButton(text="Избранное", callback_data="favorites_list")],
             [InlineKeyboardButton(text="Помощь", callback_data="help_action")]
         ]

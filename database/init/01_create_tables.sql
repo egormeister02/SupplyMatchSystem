@@ -86,7 +86,7 @@ CREATE TABLE matches (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL,
     supplier_id INTEGER NOT NULL,
-    status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+    status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected', 'closed')) DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 
     FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE,

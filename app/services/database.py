@@ -1628,6 +1628,15 @@ class DBService:
                 })
                 # Обновляем статус match
                 update_query = """
+                    UPDATE matches
+                    SET status = 'closed'
+                    WHERE request_id = :author_id AND supplier_id = :supplier_id
+                """
+                await db_service.execute_query(update_query, {
+                    "author_id": author_id,
+                    "supplier_id": supplier_id
+                })
+                update_query = """
                     UPDATE requests
                     SET status = 'closed'
                     WHERE id = :request_id
@@ -1640,3 +1649,29 @@ class DBService:
         except Exception as e:
             logger.error(f"Ошибка при добавлении отзыва: {e}")
             return False
+
+    @staticmethod
+    async def get_closed_match_for_request(request_id: int) -> dict:
+        """
+        Получает match со статусом 'closed' для заявки и возвращает supplier_id и всю строку match.
+        Args:
+            request_id (int): ID заявки
+        Returns:
+            dict: Словарь с данными match (или None, если не найден)
+        """
+        try:
+            async with get_db_session() as session:
+                db_service = DBService(session)
+                query = """
+                    SELECT * FROM matches
+                    WHERE request_id = :request_id AND status = 'closed'
+                    LIMIT 1
+                """
+                result = await db_service.execute_query(query, {"request_id": request_id})
+                row = result.mappings().first()
+                if row:
+                    return dict(row)
+                return None
+        except Exception as e:
+            logging.error(f"Ошибка при получении закрытого match для заявки {request_id}: {e}")
+            return None
