@@ -113,3 +113,124 @@ class ReportRequests(DBService):
         ORDER BY r.created_at DESC
         '''
         return await DBService.fetch_data(query, params if params else None)
+
+    @staticmethod
+    async def get_requests_by_days(days: int):
+        """
+        Get daily statistics for supplier and seeker requests for the specified number of days
+        """
+        date_filter = "AND created_at >= :date_from"
+        from_date = datetime.now() - timedelta(days=days)
+        params = {"date_from": from_date}
+
+        # Query for supplier requests
+        supplier_query = f'''
+        SELECT 
+            created_at::date AS date,
+            COUNT(*) as count
+        FROM suppliers
+        WHERE 1=1 {date_filter}
+        GROUP BY created_at::date
+        ORDER BY date
+        '''
+        supplier_data = await DBService.fetch_data(supplier_query, params)
+
+        # Query for seeker requests
+        seeker_query = f'''
+        SELECT 
+            created_at::date AS date,
+            COUNT(*) as count
+        FROM requests
+        WHERE 1=1 {date_filter}
+        GROUP BY created_at::date
+        ORDER BY date
+        '''
+        seeker_data = await DBService.fetch_data(seeker_query, params)
+
+        return {
+            "supplier_requests": supplier_data,
+            "seeker_requests": seeker_data
+        }
+
+    @staticmethod
+    async def get_requests_status_pie_data(days: int = None):
+        """
+        Получить данные для круговой диаграммы по статусам заявок за N дней (или за всё время, если days=None)
+        Возвращает словарь с данными для поставщиков, искателей и всех вместе
+        """
+        params = {}
+        date_filter = ""
+        if days is not None and days > 0:
+            date_filter = "AND created_at >= :date_from"
+            from_date = datetime.now() - timedelta(days=days)
+            params["date_from"] = from_date
+        # Поставщики
+        supplier_query = f'''
+        SELECT status, COUNT(*) as count
+        FROM suppliers
+        WHERE 1=1 {date_filter}
+        GROUP BY status
+        '''
+        supplier_data = await DBService.fetch_data(supplier_query, params if params else None)
+        # Искатели
+        seeker_query = f'''
+        SELECT status, COUNT(*) as count
+        FROM requests
+        WHERE 1=1 {date_filter}
+        GROUP BY status
+        '''
+        seeker_data = await DBService.fetch_data(seeker_query, params if params else None)
+        # Суммарно
+        all_status_counts = {}
+        for row in supplier_data + seeker_data:
+            status = row['status']
+            all_status_counts[status] = all_status_counts.get(status, 0) + row['count']
+        return {
+            'suppliers': supplier_data,
+            'seekers': seeker_data,
+            'all': [{'status': k, 'count': v} for k, v in all_status_counts.items()]
+        }
+
+    @staticmethod
+    async def get_top10_categories(days: int = None):
+        params = {}
+        date_filter = ""
+        if days and days > 0:
+            date_filter = "AND r.created_at >= :date_from"
+            from_date = datetime.now() - timedelta(days=days)
+            params["date_from"] = from_date
+        query = f'''
+        SELECT 
+            mc.name AS main_category,
+            COUNT(*) AS request_count
+        FROM requests r
+        LEFT JOIN categories c ON r.category_id = c.id
+        LEFT JOIN main_categories mc ON c.main_category_name = mc.name
+        WHERE 1=1 {date_filter}
+        GROUP BY mc.name
+        ORDER BY request_count DESC NULLS LAST
+        LIMIT 10
+        '''
+        return await DBService.fetch_data(query, params if params else None)
+
+    @staticmethod
+    async def get_top10_suppliers_by_activity(days: int = None):
+        params = {}
+        date_filter = ""
+        if days and days > 0:
+            date_filter = "AND m.created_at >= :date_from"
+            from_date = datetime.now() - timedelta(days=days)
+            params["date_from"] = from_date
+        query = f'''
+        SELECT 
+            s.id AS supplier_id,
+            s.company_name,
+            COUNT(m.id) AS accepted_count
+        FROM suppliers s
+        LEFT JOIN matches m ON s.id = m.supplier_id AND m.status = 'accepted'
+        WHERE 1=1 {date_filter}
+        GROUP BY s.id, s.company_name
+        ORDER BY accepted_count DESC NULLS LAST
+        LIMIT 10
+        '''
+        return await DBService.fetch_data(query, params if params else None)

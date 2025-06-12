@@ -37,14 +37,14 @@ report_tables_keyboard = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="Активность поставщиков", callback_data="report_table_activity")],
         [InlineKeyboardButton(text="Отзывы", callback_data="report_table_reviews")],
         [get_back_button("reports", is_state=False, button_text="Назад")]
-    ]
-)
+])
+
 
 report_graphs_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="График заявок по дням", callback_data="report_graph_by_days")],
         [InlineKeyboardButton(text="Круговая диаграмма заявок", callback_data="report_graph_pie")],
-        [InlineKeyboardButton(text="Топ-5 категорий", callback_data="report_graph_top5")],
+        [InlineKeyboardButton(text="Топ-10 категорий", callback_data="report_graph_top10")],
         [InlineKeyboardButton(text="Активность поставщиков", callback_data="report_graph_activity")],
         [get_back_button("reports", is_state=False, button_text="Назад")]
     ]
@@ -117,6 +117,10 @@ action_config = {
         "markup": report_graphs_keyboard,
         "parent": "reports",
     },
+    "report_graph_by_days": {
+        "text": "Введите количество дней для отображения графика (от 1 до 90):",
+        "parent": "report_graphs",
+    },
     "report_table_suppliers_period": {
         "text": "За какой период вы хотите получить отчёт?",
         "markup": get_report_period_keyboard(
@@ -152,6 +156,18 @@ action_config = {
             back_button_text="Назад"
         ),
         "parent": "report_tables",
+    },
+    "report_graph_pie": {
+        "text": "Введите количество дней для отображения круговой диаграммы (0 — всё время):",
+        "parent": "report_graphs",
+    },
+    "report_graph_top10": {
+        "text": "Введите количество дней для топ-10 категорий (0 — всё время):",
+        "parent": "report_graphs",
+    },
+    "report_graph_activity": {
+        "text": "Введите количество дней для топ-10 активных поставщиков (0 — всё время):",
+        "parent": "report_graphs",
     },
 }
 

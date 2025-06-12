@@ -15,7 +15,7 @@ def register_all_handlers(dp):
     
     # Определяем порядок загрузки модулей
     # Изменяем порядок: модуль requests должен загружаться ПЕРЕД suppliers
-    module_order = ["user", "base", "actions", "requests", "suppliers", "my_suppliers", "my_requests", "admin", "file_handler", "matches", "write_review", "reports.appl_create_suppl"]
+    module_order = ["user", "base", "actions", "requests", "suppliers", "my_suppliers", "my_requests", "admin", "file_handler", "matches", "write_review", "reports"]
     
     # Сначала регистрируем модули в определенном порядке
     for module_name in module_order:
