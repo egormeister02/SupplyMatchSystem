@@ -28,3 +28,31 @@ class ReportRequests(DBService):
         ORDER BY s.created_at DESC
         '''
         return await DBService.fetch_data(query, params if params else None)
+
+    @staticmethod
+    async def get_seeker_requests_report(months: int = None):
+        date_filter = ""
+        params = {}
+        if months:
+            date_filter = "AND r.created_at >= :date_from"
+            from_date = datetime.now() - timedelta(days=30 * months)
+            params["date_from"] = from_date
+        query = f'''
+        SELECT 
+            r.id AS request_id,
+            r.created_at::date AS date,
+            mc.name AS main_category,
+            c.name AS category,
+            COUNT(m.id) AS matches_count,
+            COUNT(CASE WHEN m.status = 'accepted' OR m.status = 'closed' THEN 1 END) AS accepted_count,
+            COUNT(CASE WHEN m.status = 'rejected' THEN 1 END) AS rejected_count,
+            r.status
+        FROM requests r
+        LEFT JOIN categories c ON r.category_id = c.id
+        LEFT JOIN main_categories mc ON c.main_category_name = mc.name
+        LEFT JOIN matches m ON r.id = m.request_id
+        WHERE 1=1 {date_filter}
+        GROUP BY r.id, r.created_at, mc.name, c.name, r.status
+        ORDER BY r.created_at DESC
+        '''
+        return await DBService.fetch_data(query, params if params else None)

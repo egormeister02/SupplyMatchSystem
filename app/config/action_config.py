@@ -130,6 +130,20 @@ action_config = {
         ),
         "parent": "report_tables",
     },
+    "report_table_seekers_period": {
+        "text": "За какой период вы хотите получить отчёт?",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="1 месяц", callback_data="report_table_seekers_period:1")],
+                [InlineKeyboardButton(text="3 месяца", callback_data="report_table_seekers_period:3")],
+                [InlineKeyboardButton(text="6 месяцев", callback_data="report_table_seekers_period:6")],
+                [InlineKeyboardButton(text="12 месяцев", callback_data="report_table_seekers_period:12")],
+                [InlineKeyboardButton(text="Все данные", callback_data="report_table_seekers_period:all")],
+                [get_back_button("report_tables", is_state=False, button_text="Назад")]
+            ]
+        ),
+        "parent": "report_tables",
+    },
 }
 
 def get_action_config(action):
