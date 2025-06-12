@@ -20,6 +20,36 @@ def get_main_menu_keyboard_by_role(role):
         return get_main_admin_menu_keyboard()
     return get_main_user_menu_keyboard()
 
+# --- Клавиатуры для отчётов ---
+report_type_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Таблицы", callback_data="report_tables")],
+        [InlineKeyboardButton(text="Графики", callback_data="report_graphs")],
+        [get_back_button("main_menu", is_state=False, button_text="Главное меню")]
+    ]
+)
+
+report_tables_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Заявки на поставщиков", callback_data="report_table_suppliers")],
+        [InlineKeyboardButton(text="Заявки искателей", callback_data="report_table_seekers")],
+        [InlineKeyboardButton(text="Активность поставщиков", callback_data="report_table_activity")],
+        [InlineKeyboardButton(text="Отзывы", callback_data="report_table_reviews")],
+        [get_back_button("reports", is_state=False, button_text="Назад")]
+    ]
+)
+
+report_graphs_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="График заявок по дням", callback_data="report_graph_by_days")],
+        [InlineKeyboardButton(text="Круговая диаграмма заявок", callback_data="report_graph_pie")],
+        [InlineKeyboardButton(text="Топ-5 категорий", callback_data="report_graph_top5")],
+        [InlineKeyboardButton(text="Активность поставщиков", callback_data="report_graph_activity")],
+        [get_back_button("reports", is_state=False, button_text="Назад")]
+    ]
+)
+# --- Конец клавиатур для отчётов ---
+
 # Конфигурация действий меню
 action_config = {
     "main_menu": {
@@ -69,7 +99,37 @@ action_config = {
                 "Здесь вы можете найти ответы на часто задаваемые вопросы и инструкции по использованию нашего бота.\n\n"
                 "Если у вас остались вопросы, обратитесь к администратору.",
         "markup_func": get_main_menu_keyboard_by_role
-    }
+    },
+
+    "reports": {
+        "text": "Выберите тип отчёта:",
+        "markup": report_type_keyboard,
+        "parent": "main_menu",
+    },
+    "report_tables": {
+        "text": "Выберите таблицу для отчёта:",
+        "markup": report_tables_keyboard,
+        "parent": "reports",
+    },
+    "report_graphs": {
+        "text": "Выберите график для отчёта:",
+        "markup": report_graphs_keyboard,
+        "parent": "reports",
+    },
+    "report_table_suppliers_period": {
+        "text": "За какой период вы хотите получить отчёт?",
+        "markup": InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="1 месяц", callback_data="report_table_suppliers_period:1")],
+                [InlineKeyboardButton(text="3 месяца", callback_data="report_table_suppliers_period:3")],
+                [InlineKeyboardButton(text="6 месяцев", callback_data="report_table_suppliers_period:6")],
+                [InlineKeyboardButton(text="12 месяцев", callback_data="report_table_suppliers_period:12")],
+                [InlineKeyboardButton(text="Все данные", callback_data="report_table_suppliers_period:all")],
+                [get_back_button("report_tables", is_state=False, button_text="Назад")]
+            ]
+        ),
+        "parent": "report_tables",
+    },
 }
 
 def get_action_config(action):

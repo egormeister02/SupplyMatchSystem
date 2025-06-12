@@ -305,6 +305,67 @@ async def handle_add_to_favorites(callback: CallbackQuery, bot: Bot, state: FSMC
         logging.error(f"Error in handle_add_to_favorites: {e}")
         await callback.message.answer("Произошла ошибка при добавлении в избранное. Попробуйте позже.")
 
+@router.callback_query(F.data == "admin_report")
+async def handle_reports(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """
+    Обработчик для кнопки "Отчеты". Позволяет выбрать тип отчета: таблица или графики.
+    """
+    await callback.answer()
+    from app.config.action_config import get_action_config
+    action_config = get_action_config("reports")
+    if not action_config:
+        await callback.message.answer("Конфигурация для раздела отчетов не найдена")
+        return
+    # Показываем меню выбора типа отчета
+    await callback.message.answer(
+        action_config["text"],
+        reply_markup=action_config.get("markup")
+    )
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить старое сообщение: {str(e)}")
+
+@router.callback_query(F.data == "report_tables")
+async def handle_report_tables(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """
+    Обработчик выбора типа отчета: таблицы. Показывает варианты таблиц.
+    """
+    await callback.answer()
+    from app.config.action_config import get_action_config
+    action_config = get_action_config("report_tables")
+    if not action_config:
+        await callback.message.answer("Конфигурация для таблиц не найдена")
+        return
+    await callback.message.answer(
+        action_config["text"],
+        reply_markup=action_config.get("markup")
+    )
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить старое сообщение: {str(e)}")
+
+@router.callback_query(F.data == "report_graphs")
+async def handle_report_graphs(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """
+    Обработчик выбора типа отчета: графики. Показывает варианты графиков.
+    """
+    await callback.answer()
+    from app.config.action_config import get_action_config
+    action_config = get_action_config("report_graphs")
+    if not action_config:
+        await callback.message.answer("Конфигурация для графиков не найдена")
+        return
+    await callback.message.answer(
+        action_config["text"],
+        reply_markup=action_config.get("markup")
+    )
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить старое сообщение: {str(e)}")
+
 # Добавление роутера в основной диспетчер
 def register_handlers(dp):
     """Register action handlers"""

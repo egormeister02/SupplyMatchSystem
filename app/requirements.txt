@@ -7,4 +7,5 @@ quart>=0.18.3
 hypercorn>=0.14.3
 python-dotenv>=1.0.0
 pytz>=2023.3
-boto3>=1.28.0
+boto3>=1.28.
+openpyxl>=3.1.2
