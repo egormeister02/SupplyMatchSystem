@@ -1407,6 +1407,11 @@ async def remove_admin_command(message: Message, bot: Bot):
     if not user_id:
         await message.answer("❌ Пользователь не найден.")
         return
+    # Проверяем, не является ли топ-админом
+    top_admin_ids = get_admin_ids()
+    if int(user_id) in top_admin_ids:
+        await message.answer("❌ Нельзя удалить топ-админа.")
+        return
     # Проверяем, является ли админом
     if not await is_user_admin(user_id):
         await message.answer("Пользователь не является админом.")

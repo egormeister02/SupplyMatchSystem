@@ -166,3 +166,24 @@ def get_keyboard_with_back(buttons, back_target, is_state=True, row_width=1, but
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_report_period_keyboard(callback_prefix: str, back_target: str, back_button_text: str = "Назад"):
+    """
+    Универсальная клавиатура выбора периода для отчётов.
+    Args:
+        callback_prefix (str): Префикс для callback_data (например, 'report_table_reviews_period')
+        back_target (str): Куда возвращаться по кнопке назад
+        back_button_text (str): Текст кнопки назад
+    Returns:
+        InlineKeyboardMarkup
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="1 месяц", callback_data=f"{callback_prefix}:1")],
+            [InlineKeyboardButton(text="3 месяца", callback_data=f"{callback_prefix}:3")],
+            [InlineKeyboardButton(text="6 месяцев", callback_data=f"{callback_prefix}:6")],
+            [InlineKeyboardButton(text="12 месяцев", callback_data=f"{callback_prefix}:12")],
+            [InlineKeyboardButton(text="Все данные", callback_data=f"{callback_prefix}:all")],
+            [get_back_button(back_target, is_state=False, button_text=back_button_text)]
+        ]
+    )
+

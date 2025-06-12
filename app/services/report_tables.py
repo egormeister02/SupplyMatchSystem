@@ -88,3 +88,38 @@ class SeekerRequestsReportXLSX(ReportXLSX):
                 row.get("status")
             ]
         super().__init__(data, headers, sheet_title, row_builder)
+
+class SuppliersActivityReportXLSX(ReportXLSX):
+    def __init__(self, data: list):
+        headers = [
+            "ID поставщика", "Дата создания", "Дата последнего действия", "Принял", "Отклонил", "Завершил", "Рейтинг"
+        ]
+        sheet_title = "Активность поставщиков"
+        def row_builder(row):
+            return [
+                row.get("supplier_id"),
+                row.get("created_at"),
+                row.get("last_activity"),
+                row.get("accepted_count"),
+                row.get("rejected_count"),
+                row.get("closed_count"),
+                row.get("rating")
+            ]
+        super().__init__(data, headers, sheet_title, row_builder)
+
+class ReviewsReportXLSX(ReportXLSX):
+    def __init__(self, data: list):
+        headers = [
+            "Дата создания", "ID поставщика", "ID запроса", "Username автора", "Оценка", "Текст отзыва"
+        ]
+        sheet_title = "Отзывы"
+        def row_builder(row):
+            return [
+                row.get("created_at"),
+                row.get("supplier_id"),
+                row.get("request_id"),
+                row.get("author_username"),
+                row.get("mark"),
+                row.get("text")
+            ]
+        super().__init__(data, headers, sheet_title, row_builder)

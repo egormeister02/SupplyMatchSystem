@@ -12,7 +12,8 @@ from app.keyboards.inline import (
     get_keyboard_with_back,
     get_back_button,
     get_main_user_menu_keyboard,
-    get_main_admin_menu_keyboard
+    get_main_admin_menu_keyboard,
+    get_report_period_keyboard
 )
 
 def get_main_menu_keyboard_by_role(role):
@@ -118,29 +119,37 @@ action_config = {
     },
     "report_table_suppliers_period": {
         "text": "За какой период вы хотите получить отчёт?",
-        "markup": InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="1 месяц", callback_data="report_table_suppliers_period:1")],
-                [InlineKeyboardButton(text="3 месяца", callback_data="report_table_suppliers_period:3")],
-                [InlineKeyboardButton(text="6 месяцев", callback_data="report_table_suppliers_period:6")],
-                [InlineKeyboardButton(text="12 месяцев", callback_data="report_table_suppliers_period:12")],
-                [InlineKeyboardButton(text="Все данные", callback_data="report_table_suppliers_period:all")],
-                [get_back_button("report_tables", is_state=False, button_text="Назад")]
-            ]
+        "markup": get_report_period_keyboard(
+            callback_prefix="report_table_suppliers_period",
+            back_target="report_tables",
+            back_button_text="Назад"
         ),
         "parent": "report_tables",
     },
     "report_table_seekers_period": {
         "text": "За какой период вы хотите получить отчёт?",
-        "markup": InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="1 месяц", callback_data="report_table_seekers_period:1")],
-                [InlineKeyboardButton(text="3 месяца", callback_data="report_table_seekers_period:3")],
-                [InlineKeyboardButton(text="6 месяцев", callback_data="report_table_seekers_period:6")],
-                [InlineKeyboardButton(text="12 месяцев", callback_data="report_table_seekers_period:12")],
-                [InlineKeyboardButton(text="Все данные", callback_data="report_table_seekers_period:all")],
-                [get_back_button("report_tables", is_state=False, button_text="Назад")]
-            ]
+        "markup": get_report_period_keyboard(
+            callback_prefix="report_table_seekers_period",
+            back_target="report_tables",
+            back_button_text="Назад"
+        ),
+        "parent": "report_tables",
+    },
+    "report_table_activity_period": {
+        "text": "За какой период вы хотите получить отчёт по активности поставщиков?",
+        "markup": get_report_period_keyboard(
+            callback_prefix="report_table_activity_period",
+            back_target="report_tables",
+            back_button_text="Назад"
+        ),
+        "parent": "report_tables",
+    },
+    "report_table_reviews_period": {
+        "text": "За какой период вы хотите получить отчёт по отзывам?",
+        "markup": get_report_period_keyboard(
+            callback_prefix="report_table_reviews_period",
+            back_target="report_tables",
+            back_button_text="Назад"
         ),
         "parent": "report_tables",
     },
