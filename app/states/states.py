@@ -76,3 +76,7 @@ class ReviewStates(StatesGroup):
     waiting_mark = State()
     waiting_text = State()
     confirm = State()
+
+class HelpStates(StatesGroup):
+    waiting_problem_description = State()  # Ожидание ввода описания проблемы пользователем
+    waiting_admin_answer = State()         # Ожидание ответа от админа

@@ -18,8 +18,7 @@ from app.services import get_db_session, DBService
 # Инициализируем роутер
 router = Router()
 
-@router.callback_query(F.data.in_(["suppliers", "requests_list", "help_action",
-                               "my_suppliers"]))
+@router.callback_query(F.data.in_(["suppliers", "requests_list", "my_suppliers"]))
 async def handle_menu_action(callback: CallbackQuery, bot: Bot, state: FSMContext):
     """
     Обработчик для пунктов меню без состояний.

@@ -95,13 +95,6 @@ action_config = {
         "markup": get_back_keyboard("requests_list", is_state=False, button_text="Назад")
     },
 
-    "help_action": {
-        "text": "Добро пожаловать в раздел помощи!\n\n"
-                "Здесь вы можете найти ответы на часто задаваемые вопросы и инструкции по использованию нашего бота.\n\n"
-                "Если у вас остались вопросы, обратитесь к администратору.",
-        "markup_func": get_main_menu_keyboard_by_role
-    },
-
     "reports": {
         "text": "Выберите тип отчёта:",
         "markup": report_type_keyboard,

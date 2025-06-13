@@ -62,7 +62,8 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         photo=FSInputFile(photo),
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
                 else:
                     # Пробуем отправить как URL или ID файла
@@ -70,7 +71,8 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         photo=photo,
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
             elif document:
                 # Проверяем, является ли документ локальным файлом
@@ -80,7 +82,8 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         document=FSInputFile(document),
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
                 else:
                     # Пробуем отправить как URL или ID файла
@@ -88,7 +91,8 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         document=document,
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
             elif video:
                 # Проверяем, является ли видео локальным файлом
@@ -98,7 +102,8 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         video=FSInputFile(video),
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
                 else:
                     # Пробуем отправить как URL или ID файла
@@ -106,13 +111,15 @@ class AdminChatService:
                         chat_id=config.ADMIN_GROUP_CHAT_ID,
                         video=video,
                         caption=text,
-                        reply_markup=reply_markup
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
                     )
             else:
                 message = await bot.send_message(
                     chat_id=config.ADMIN_GROUP_CHAT_ID,
                     text=text,
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
                 )
                 
             return message.message_id

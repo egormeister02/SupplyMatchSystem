@@ -109,9 +109,12 @@ CREATE TABLE help_requests (
     id SERIAL PRIMARY KEY,
     user_id BIGINT,
     request TEXT NOT NULL,
-    status VARCHAR(50) CHECK (status IN ('pending', 'answered', 'closed')) DEFAULT 'pending',
+    answer TEXT,
+    admin_id BIGINT,
+    status VARCHAR(50) CHECK (status IN ('pending', 'answered')) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT NOW(),
-    FOREIGN KEY (user_id) REFERENCES users(tg_id)
+    FOREIGN KEY (user_id) REFERENCES users(tg_id),
+    FOREIGN KEY (admin_id) REFERENCES users(tg_id)
 );
 
 -- Create reviews table
