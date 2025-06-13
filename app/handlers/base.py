@@ -13,15 +13,6 @@ from app.services.database import DBService
 # Создаем роутер для базовых команд с более низким приоритетом
 router = Router(name="base_commands")
 
-@router.message(Command("help"))
-async def cmd_help(message: types.Message):
-    help_text = """
-    Доступные команды:
-    /start - Начать работу с ботом
-    /help - Показать справку
-    """
-    await message.answer(help_text)
-
 
 @router.callback_query(F.data.startswith("back_to_state:"))
 async def handle_back_to_state(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
