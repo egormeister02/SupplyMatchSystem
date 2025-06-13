@@ -650,9 +650,10 @@ review_states_config = {
         "back_state": MyRequestStates.viewing_request_suppliers,
     },
     ReviewStates.waiting_text: {
-        "text": "Напишите текст отзыва:",
+        "text": "Напишите текст отзыва (или нажмите 'Пропустить'):",
         "markup": InlineKeyboardMarkup(
             inline_keyboard=[
+                [InlineKeyboardButton(text="Пропустить", callback_data="review_skip_text")],
                 [get_back_button("waiting_mark", is_state=True, button_text="Назад к оценке", state_group="ReviewStates")]
             ]
         ),

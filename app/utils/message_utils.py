@@ -844,8 +844,11 @@ async def send_review_card(
             4: '🙂',
             5: '🤩',
         }.get(mark, '⭐')
+        review_text = review.get('text')
+        if not review_text:
+            review_text = ''
         text = f"{mark_emoji} Оценка: {mark}\n\n" \
-               f"{review['text']}\n\n" \
+               f"{review_text}\n\n" \
                f"Дата: {review['created_at'].strftime('%d.%m.%Y %H:%M') if hasattr(review['created_at'], 'strftime') else review['created_at']}\n"
 
     # Кнопки навигации и назад

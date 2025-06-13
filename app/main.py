@@ -86,8 +86,7 @@ async def startup():
     
     # Set bot commands
     await bot.set_my_commands([
-        types.BotCommand(command="/start", description="Главное меню"),
-        types.BotCommand(command="/help", description="Помощь")
+        types.BotCommand(command="/start", description="Главное меню")
     ])
     
     logger.info("Application started successfully")

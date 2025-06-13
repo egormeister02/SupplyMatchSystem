@@ -47,6 +47,21 @@ async def review_write_text(message: Message, state: FSMContext):
     await state.set_state(ReviewStates.confirm)
     await message.answer(confirm_text, reply_markup=config["markup"])
 
+@router.callback_query(ReviewStates.waiting_text, F.data == "review_skip_text")
+async def review_skip_text(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # Remove keyboard from previous review step
+    await remove_keyboard_from_context(callback.bot, callback)
+    text = ""
+    await state.update_data(review_text=text)
+    # Показываем подтверждение
+    data = await state.get_data()
+    mark = data.get("review_mark")
+    confirm_text = f"Ваша оценка: {mark}\nВаш отзыв: (без текста)\n\nВсе верно?"
+    config = get_state_config(ReviewStates.confirm)
+    await state.set_state(ReviewStates.confirm)
+    await callback.message.answer(confirm_text, reply_markup=config["markup"])
+
 @router.callback_query(ReviewStates.confirm, F.data == "review_send")
 async def review_send(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
