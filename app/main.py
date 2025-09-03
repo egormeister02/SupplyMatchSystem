@@ -14,6 +14,7 @@ from app.config import config
 from app.handlers import register_all_handlers
 from app.config.logging import app_logger
 from app.services.database import init_db
+from app.services.deepseek import DeepSeekService
 
 # Логгер для main.py, используем существующую конфигурацию из app.config.logging
 logger = logging.getLogger(__name__)
@@ -45,6 +46,17 @@ async def startup():
             logger.error("Database initialization reported failure")
     except Exception as e:
         logger.error(f"Database initialization exception: {e}")
+
+    # Initialize DeepSeek service (will schedule initial jokes generation)
+    try:
+        DeepSeekService.get_instance(
+            primary_system_instructions=[
+                "You are a witty Russian comedian who writes short, clean one-liner jokes.",
+                "Always avoid offensive content."
+            ]
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize DeepSeekService: {e}")
 
     # Webhook setup
     webhook_url = f"{config.WEBHOOK_URL}{config.WEBHOOK_PATH}"

@@ -6,16 +6,14 @@ class BaseConfig(BaseSettings):
     # Общие настройки для всех сред
     BOT_TOKEN: str
     DATABASE_URL: str
-    S3_BUCKET_NAME: str
-    S3_ACCESS_KEY: str
-    S3_SECRET_KEY: str
-    S3_ENDPOINT_URL: str
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = 'Europe/Moscow'
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    ADMIN_IDS: list = []
-    ADMIN_GROUP_CHAT_ID: int = None  # ID группового чата администраторов
+    
+    # DeepSeek settings
+    DEEPSEEK_API_KEY: str | None = None
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     
     class Config:
         env_file_encoding = "utf-8"

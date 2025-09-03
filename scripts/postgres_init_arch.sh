@@ -48,7 +48,7 @@ sudo systemctl start postgresql
 sudo systemctl enable postgresql
 
 # Создание пользователя и БД
-DB_NAME="supply_match"
+DB_NAME="jokes_bot"
 DB_USER="bot_user"
 DB_PASS="systemahuema"  # Генерация случайного пароля
 

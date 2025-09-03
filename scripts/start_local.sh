@@ -4,6 +4,15 @@
 # Set environment variables
 export APP_ENV="local"
 
+# Activate virtual environment
+if [ -d "venv" ]; then
+    echo "Активация виртуального окружения..."
+    source venv/bin/activate
+else
+    echo "Виртуальное окружение не найдено. Создайте его командой: python -m venv venv"
+    exit 1
+fi
+
 # Define cleanup function to execute on exit
 cleanup() {
     echo "Завершение работы и очистка..."

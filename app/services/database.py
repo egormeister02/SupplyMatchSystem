@@ -206,3 +206,174 @@ class DBService:
             logger.error(f"Error details: {str(e)}")
             raise
     
+    # Методы, связанные с topics и topic_id, а также id в users_jokes, удалены
+    # Оставляю только методы для работы с существующими таблицами и полями
+    
+    @staticmethod
+    async def create_topic(topic: str, session: AsyncSession = None) -> int:
+        """
+        Создает новую тему (topic) и возвращает её id. Если тема уже есть — возвращает её id.
+        """
+        query = "INSERT INTO topics (topic) VALUES (:topic) RETURNING id"
+        select_query = "SELECT id FROM topics WHERE topic = :topic"
+        try:
+            if session is not None:
+                try:
+                    result = await session.execute(text(query), {"topic": topic})
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        logger.info(f"Created topic with ID: {row['id']}")
+                        return int(row["id"])
+                except Exception as e:
+                    # Если тема уже есть (unique violation), ищем её id
+                    logger.info(f"Exception on create_topic: {e}, trying to fetch existing topic id")
+                    result = await session.execute(text(select_query), {"topic": topic})
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        return int(row["id"])
+                    raise
+            else:
+                # Старый режим — отдельная сессия
+                async with engine.begin() as conn:
+                    try:
+                        result = await conn.execute(text(query), {"topic": topic})
+                        row = result.mappings().first()
+                        if row and "id" in row:
+                            logger.info(f"Created topic with ID: {row['id']}")
+                            return int(row["id"])
+                    except Exception as e:
+                        logger.info(f"Exception on create_topic: {e}, trying to fetch existing topic id")
+                        result = await conn.execute(text(select_query), {"topic": topic})
+                        row = result.mappings().first()
+                        if row and "id" in row:
+                            return int(row["id"])
+                        raise
+        except Exception as e:
+            logger.error(f"Error creating topic: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def create_joke(topic_id: int, text_joke: str, session: AsyncSession = None) -> int:
+        """
+        Создает новый анекдот для темы и возвращает его id.
+        """
+        query = "INSERT INTO jokes (topic_id, joke) VALUES (:topic_id, :joke) RETURNING id"
+        try:
+            if session is not None:
+                result = await session.execute(text(query), {"topic_id": topic_id, "joke": text_joke})
+                row = result.mappings().first()
+                if row and "id" in row:
+                    logger.info(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
+                    return int(row["id"])
+                else:
+                    raise ValueError("Failed to create joke - no ID returned")
+            else:
+                async with engine.begin() as conn:
+                    result = await conn.execute(text(query), {"topic_id": topic_id, "joke": text_joke})
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        logger.info(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
+                        return int(row["id"])
+                    else:
+                        raise ValueError("Failed to create joke - no ID returned")
+        except Exception as e:
+            logger.error(f"Error creating joke: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def get_jokes_by_topic_id(topic_id: int) -> list:
+        """
+        Получает все анекдоты для определенной темы.
+        """
+        try:
+            query = """
+                SELECT id, joke, created_at FROM jokes WHERE topic_id = :topic_id ORDER BY id
+            """
+            return await DBService.fetch_data(query, {"topic_id": topic_id})
+        except Exception as e:
+            logger.error(f"Error getting jokes by topic ID: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def get_random_joke_for_user(user_id: int) -> dict:
+        """
+        Получает случайный анекдот для пользователя, который он еще не слышал (по views).
+        """
+        try:
+            query = """
+                SELECT j.id, j.joke, t.topic
+                FROM user_unheard_jokes uuj
+                JOIN jokes j ON j.id = uuj.joke_id
+                JOIN topics t ON t.id = j.topic_id
+                WHERE uuj.tg_id = :user_id
+                ORDER BY RANDOM()
+                LIMIT 1
+            """
+            return await DBService.fetch_one(query, {"user_id": user_id})
+        except Exception as e:
+            logger.error(f"Error getting random joke for user: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def get_random_unseen_joke_for_user(user_id: int) -> dict:
+        """
+        Возвращает случайный анекдот, который пользователь ещё не видел (нет записи в users_jokes)
+        """
+        try:
+            query = """
+                SELECT j.id, j.joke, t.topic
+                FROM jokes j
+                JOIN topics t ON t.id = j.topic_id
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM users_jokes uj WHERE uj.user_id = :user_id AND uj.joke_id = j.id
+                )
+                ORDER BY RANDOM()
+                LIMIT 1
+            """
+            return await DBService.fetch_one(query, {"user_id": user_id})
+        except Exception as e:
+            logger.error(f"Error getting random unseen joke for user: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def record_user_joke_interaction(user_id: int, joke_id: int, reaction: str = "skip"):
+        """
+        Записывает взаимодействие пользователя с анекдотом.
+        """
+        try:
+            # Проверяем, есть ли уже запись
+            check_query = """
+                SELECT 1 FROM users_jokes WHERE user_id = :user_id AND joke_id = :joke_id
+            """
+            existing = await DBService.fetch_one(check_query, {
+                "user_id": user_id,
+                "joke_id": joke_id
+            })
+            if existing:
+                # Обновляем существующую запись
+                update_query = """
+                    UPDATE users_jokes SET reaction = :reaction, created_at = NOW()
+                    WHERE user_id = :user_id AND joke_id = :joke_id
+                """
+                await DBService.execute(update_query, {
+                    "user_id": user_id,
+                    "joke_id": joke_id,
+                    "reaction": reaction
+                })
+                logger.info(f"Updated user {user_id} reaction to joke {joke_id}: {reaction}")
+            else:
+                # Создаем новую запись
+                insert_query = """
+                    INSERT INTO users_jokes (user_id, joke_id, reaction)
+                    VALUES (:user_id, :joke_id, :reaction)
+                """
+                await DBService.execute(insert_query, {
+                    "user_id": user_id,
+                    "joke_id": joke_id,
+                    "reaction": reaction
+                })
+                logger.info(f"Recorded user {user_id} reaction to joke {joke_id}: {reaction}")
+        except Exception as e:
+            logger.error(f"Error recording user joke interaction: {str(e)}")
+            raise
+    
