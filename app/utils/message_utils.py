@@ -50,7 +50,7 @@ async def remove_keyboard_from_message(bot: Bot, chat_id: int, message_id: int) 
         logger.error(f"Error removing keyboard from message {message_id}: {e}")
         return False
 
-async def edit_message_with_reaction(bot: Bot, chat_id: int, message_id: int, joke_text: str, topic: str, reaction: str, reply_markup: InlineKeyboardMarkup = None) -> bool:
+async def edit_message_with_reaction(bot: Bot, chat_id: int, message_id: int, joke_text: str, reaction: str, reply_markup: InlineKeyboardMarkup = None) -> bool:
     """
     Редактирует сообщение, добавляя пометку о реакции пользователя
     
@@ -59,7 +59,6 @@ async def edit_message_with_reaction(bot: Bot, chat_id: int, message_id: int, jo
         chat_id (int): ID чата
         message_id (int): ID сообщения
         joke_text (str): Текст анекдота
-        topic (str): Тема анекдота
         reaction (str): Реакция пользователя ('like', 'dislike' или 'none')
         reply_markup (InlineKeyboardMarkup, optional): Новая клавиатура
         
@@ -119,15 +118,6 @@ async def create_dynamic_keyboard(
     """
     logger.info(f"Creating dynamic keyboard: users_jokes_id={users_jokes_id}, message_id={message_id}, current_state={current_state}")
     
-    # Дополнительная проверка типов
-    if users_jokes_id is not None and (not isinstance(users_jokes_id, int) or users_jokes_id <= 0):
-        logger.error(f"Invalid users_jokes_id type: {type(users_jokes_id)}, value: {users_jokes_id}")
-        users_jokes_id = None
-    
-    if not isinstance(message_id, int) or message_id <= 0:
-        logger.error(f"Invalid message_id type: {type(message_id)}, value: {message_id}")
-        return InlineKeyboardMarkup(inline_keyboard=[])
-    
     keyboard_rows = []
     
     # Кнопки реакции, только если есть users_jokes_id и они должны быть в текущем состоянии
@@ -149,12 +139,12 @@ async def create_dynamic_keyboard(
         logger.info(f"Like callback_data: {like_callback}")
         logger.info(f"Dislike callback_data: {dislike_callback}")
     
-    # Кнопки навигации, если они должны быть в текущем состоянии
+    # Кнопки навигации, если они должны быть в текущем состоянии и есть users_jokes_id
     if current_state in ["full", "nav_only"]:
         nav_suffix = "nav_full" if current_state == "full" else "nav_only"
-        change_topic_callback = f"change_topic_{message_id}_{nav_suffix}"
-        next_joke_callback = f"next_joke_{message_id}_{nav_suffix}"
-        keyboard_rows.append([
+        change_topic_callback = f"change_topic_{users_jokes_id}_{message_id}_{nav_suffix}"
+        next_joke_callback = f"next_joke_{users_jokes_id}_{message_id}_{nav_suffix}"
+        keyboard_rows.append([ 
             InlineKeyboardButton(
                 text="🔄 Сменить тему",
                 callback_data=change_topic_callback
@@ -163,7 +153,7 @@ async def create_dynamic_keyboard(
                 text="➡️ Следующий",
                 callback_data=next_joke_callback
             )
-        ])
+        ]) 
         logger.info(f"Added navigation buttons with suffix: {nav_suffix}")
         logger.info(f"Change topic callback_data: {change_topic_callback}")
         logger.info(f"Next joke callback_data: {next_joke_callback}")

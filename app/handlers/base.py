@@ -126,9 +126,6 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
     try:
         # Парсим callback_data: "like_123_456_reaction_full" или "dislike_123_456_reaction_only"
         parts = callback.data.split("_")
-        if len(parts) < 4: # Минимум 4 части: type, users_jokes_id, message_id, suffix
-            await callback.answer("Ошибка в данных кнопки")
-            return
         
         reaction_type = parts[0] # like или dislike
         
@@ -143,12 +140,6 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
             message_id = int(parts[2])
         except ValueError as e:
             logger.error(f"Failed to parse message_id from parts[2]='{parts[2]}': {e}")
-            await callback.answer("Ошибка в данных кнопки")
-            return
-        
-        # Дополнительная проверка users_jokes_id
-        if users_jokes_id <= 0:
-            logger.error(f"Invalid users_jokes_id: {users_jokes_id}")
             await callback.answer("Ошибка в данных кнопки")
             return
         
@@ -181,7 +172,7 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
             result = await session.execute(
                 text(
                     """
-                    SELECT j.joke, t.topic 
+                    SELECT j.joke
                     FROM users_jokes uj
                     JOIN jokes j ON j.id = uj.joke_id 
                     JOIN topics t ON t.id = j.topic_id 
@@ -196,9 +187,8 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
                 return
             
             joke_text = row["joke"]
-            topic = row["topic"]
         
-        logger.info(f"Retrieved joke data: topic='{topic}', joke_text='{joke_text[:50]}...'")
+        logger.info(f"Retrieved joke data: joke_text='{joke_text[:50]}...'")
         
         # Определяем новое состояние клавиатуры
         new_state = "nav_only" if current_suffix == "reaction_full" else "none"
@@ -216,28 +206,12 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
             chat_id, 
             message_id, 
             joke_text, 
-            topic, 
             reaction_type, # Передаем тип реакции для эмоджи
             reply_markup=new_keyboard
         )
         if not message_edited:
             logger.error(f"Failed to edit message {message_id} with new joke")
         logger.info(f"Message editing result: {message_edited}")
-        
-        # Дополнительно проверяем, что клавиатура действительно изменилась
-        current_keyboard = callback.message.reply_markup
-        if current_keyboard is None or str(current_keyboard) != str(new_keyboard):
-            try:
-                await callback.bot.edit_message_reply_markup(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    reply_markup=new_keyboard
-                )
-                logger.info(f"Successfully updated keyboard for message {message_id} to {new_state}")
-            except Exception as e:
-                logger.warning(f"Failed to update keyboard for message {message_id}: {e}")
-        else:
-            logger.info(f"Keyboard for message {message_id} already has {new_state} state, skipping update")
         
         await callback.answer()
         
@@ -278,9 +252,8 @@ async def handle_random_joke_callback(callback: types.CallbackQuery):
             return
             
         joke_text = joke_row["joke"]
-        topic = joke_row["topic"]
 
-        logger.info(f"Extracted joke data in random_joke: joke_id={joke_id}, topic='{topic}', joke_text='{joke_text[:50]}...'")
+        logger.info(f"Extracted joke data in random_joke: joke_id={joke_id}, joke_text='{joke_text[:50]}...'")
 
         # Создаём запись в users_jokes (реакция по умолчанию 'skip')
         await DBService.record_user_joke_interaction(user_id, joke_id, reaction="skip")
@@ -317,89 +290,32 @@ async def handle_change_topic_callback(callback: types.CallbackQuery, state: FSM
     try:
         # Парсим callback_data: "change_topic_456_nav_full" или "change_topic_456_nav_only"
         parts = callback.data.split("_")
-        if len(parts) < 5: # Минимум 5 частей: change, topic, message_id, nav, suffix
-            await callback.answer("Ошибка в данных кнопки")
-            return
+        message_id = int(parts[3])
+        users_jokes_id = int(parts[2])
+        current_suffix = parts[4] + "_" + parts[5] # nav_full или nav_only
         
-        try:
-            message_id = int(parts[2])  # parts[2] содержит message_id, так как change_topic разбивается на две части
-        except ValueError as e:
-            logger.error(f"Failed to parse message_id from parts[2]='{parts[2]}': {e}")
-            await callback.answer("Ошибка в данных кнопки")
-            return
-        
-        # Дополнительная проверка message_id
-        if message_id <= 0:
-            logger.error(f"Invalid message_id: {message_id}")
-            await callback.answer("Ошибка в данных кнопки")
-            return
-        
-        # Суффикс может быть "nav_full" или "nav_only"
-        if len(parts) >= 5:
-            current_suffix = f"{parts[3]}_{parts[4]}" # nav_full или nav_only
-        else:
-            current_suffix = parts[3] # nav_full или nav_only
-        
-        logger.info(f"Parsed change_topic: message_id={message_id}, current_suffix={current_suffix}")
-        
-        # Определяем users_jokes_id из текущей клавиатуры (если кнопки реакции еще есть)
-        users_jokes_id = None
-        if callback.message.reply_markup:
-            for row in callback.message.reply_markup.inline_keyboard:
-                for btn in row:
-                    if btn.callback_data and (btn.callback_data.startswith("like_") or btn.callback_data.startswith("dislike_")):
-                        try:
-                            users_jokes_id = int(btn.callback_data.split("_")[1])
-                            break
-                        except (ValueError, IndexError) as e:
-                            logger.warning(f"Failed to parse users_jokes_id from {btn.callback_data}: {e}")
-                            continue
-                if users_jokes_id:
-                    break
-        
-        # Дополнительная проверка users_jokes_id
-        if users_jokes_id is not None and users_jokes_id <= 0:
-            logger.error(f"Invalid users_jokes_id: {users_jokes_id}")
-            users_jokes_id = None
-        
-        logger.info(f"Extracted users_jokes_id from keyboard: {users_jokes_id}")
+        logger.info(f"Parsed change_topic: message_id={message_id}, users_jokes_id={users_jokes_id}, current_suffix={current_suffix}")
         
         # Определяем новое состояние клавиатуры
-        new_state = "reaction_only" if current_suffix == "nav_full" and users_jokes_id is not None else "none"
+        new_state = "reaction_only" if current_suffix == "nav_full" else "none"
         
         # Создаем новую клавиатуру без кнопок навигации
         from app.utils.message_utils import create_dynamic_keyboard
         if users_jokes_id is not None: # Только если есть users_jokes_id для создания кнопок реакции
             new_keyboard = await create_dynamic_keyboard(users_jokes_id, message_id, new_state)
-            
-            # Проверяем, изменилась ли клавиатура
-            current_keyboard = callback.message.reply_markup
-            if current_keyboard is None or str(current_keyboard) != str(new_keyboard):
-                try:
-                    await callback.bot.edit_message_reply_markup(
+            await callback.bot.edit_message_reply_markup(
                         chat_id=chat_id,
                         message_id=message_id,
                         reply_markup=new_keyboard
                     )
-                    logger.info(f"Successfully updated keyboard for message {message_id} to {new_state}")
-                except Exception as e:
-                    logger.warning(f"Failed to update keyboard for message {message_id}: {e}")
-            else:
-                logger.info(f"Keyboard for message {message_id} already has {new_state} state, skipping update")
+            logger.info(f"Successfully updated keyboard for message {message_id} to {new_state}")
         else: # Если users_jokes_id нет, удаляем всю клавиатуру
-            current_keyboard = callback.message.reply_markup
-            if current_keyboard is not None:
-                try:
-                    await callback.bot.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=None
-                    )
-                    logger.info(f"Successfully removed keyboard for message {message_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove keyboard for message {message_id}: {e}")
-            else:
-                logger.info(f"Message {message_id} already has no keyboard, skipping update")
+            await callback.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=None
+            )
+            logger.info(f"Successfully removed keyboard for message {message_id}")
             
         await callback.answer()
         await request_joke_topic(callback.message, state)
@@ -420,51 +336,15 @@ async def handle_next_joke_callback(callback: types.CallbackQuery):
             await callback.answer("Ошибка в данных кнопки")
             return
         
-        try:
-            message_id = int(parts[2])  # parts[2] содержит message_id, так как next_joke разбивается на две части
-        except ValueError as e:
-            logger.error(f"Failed to parse message_id from parts[2]='{parts[2]}': {e}")
-            await callback.answer("Ошибка в данных кнопки")
-            return
         
-        # Дополнительная проверка message_id
-        if message_id <= 0:
-            logger.error(f"Invalid message_id: {message_id}")
-            await callback.answer("Ошибка в данных кнопки")
-            return
-        
-        # Суффикс может быть "nav_full" или "nav_only"
-        if len(parts) >= 5:
-            current_suffix = f"{parts[3]}_{parts[4]}" # nav_full или nav_only
-        else:
-            current_suffix = parts[3] # nav_full или nav_only
-        
-        logger.info(f"Parsed next_joke: message_id={message_id}, current_suffix={current_suffix}")
-        
-        # Определяем users_jokes_id из текущей клавиатуры (если кнопки реакции еще есть)
-        users_jokes_id = None
-        if callback.message.reply_markup:
-            for row in callback.message.reply_markup.inline_keyboard:
-                for btn in row:
-                    if btn.callback_data and (btn.callback_data.startswith("like_") or btn.callback_data.startswith("dislike_")):
-                        try:
-                            users_jokes_id = int(btn.callback_data.split("_")[1])
-                            break
-                        except (ValueError, IndexError) as e:
-                            logger.error(f"Failed to parse users_jokes_id from {btn.callback_data}: {e}")
-                            continue
-                if users_jokes_id:
-                    break
-        
-        # Дополнительная проверка users_jokes_id
-        if users_jokes_id is not None and users_jokes_id <= 0:
-            logger.error(f"Invalid users_jokes_id: {users_jokes_id}")
-            users_jokes_id = None
-        
-        logger.info(f"Extracted users_jokes_id from keyboard: {users_jokes_id}")
-        
+        message_id = int(parts[3])  # parts[2] содержит message_id, так как next_joke разбивается на две части
+        users_jokes_id = int(parts[2])
+        current_suffix = parts[4] + "_" + parts[5] # nav_full или nav_only
+
+        logger.info(f"Parsed next_joke: message_id={message_id}, users_jokes_id={users_jokes_id}, current_suffix={current_suffix}")
+
         # Определяем новое состояние клавиатуры
-        new_state = "reaction_only" if current_suffix == "nav_full" and users_jokes_id is not None else "none"
+        new_state = "reaction_only" if current_suffix == "nav_full" else "none"
         
         # Создаем новую клавиатуру без кнопок навигации
         from app.utils.message_utils import create_dynamic_keyboard
@@ -483,7 +363,7 @@ async def handle_next_joke_callback(callback: types.CallbackQuery):
             )
             
         # Получаем случайный анекдот, который пользователь ещё не видел
-        joke_row = await DBService.get_random_unseen_joke_for_user(user_id)
+        joke_row = await DBService.get_random_joke_for_user(user_id)
         if not joke_row:
             await callback.answer("Нет новых анекдотов для вас! Попробуйте позже.", show_alert=True)
             return
@@ -498,16 +378,9 @@ async def handle_next_joke_callback(callback: types.CallbackQuery):
             await callback.answer("Ошибка при получении анекдота")
             return
             
-        # Дополнительная проверка joke_id
-        if not isinstance(joke_id, int) or joke_id <= 0:
-            logger.error(f"Invalid joke_id type or value: {type(joke_id)}, value: {joke_id}")
-            await callback.answer("Ошибка при получении анекдота")
-            return
-            
         joke_text = joke_row["joke"]
-        topic = joke_row["topic"]  # Теперь это поле есть в get_random_unseen_joke_for_user
         
-        logger.info(f"Extracted joke data: joke_id={joke_id}, topic='{topic}', joke_text='{joke_text[:50]}...'")
+        logger.info(f"Extracted joke data: joke_id={joke_id}, joke_text='{joke_text[:50]}...'")
         
         # Создаём запись в users_jokes (реакция по умолчанию 'skip')
         await DBService.record_user_joke_interaction(user_id, joke_id, reaction="skip")
@@ -529,50 +402,12 @@ async def handle_next_joke_callback(callback: types.CallbackQuery):
         logger.info(f"Created users_jokes record with id: {users_jokes_id_new}")
         
         # Отправляем новый анекдот в ТО ЖЕ сообщение, меняя текст и сохраняя клавиатуру
-        from app.utils.message_utils import edit_message_with_reaction, send_joke_message
-        if users_jokes_id_new is not None:
-            new_keyboard = await create_dynamic_keyboard(users_jokes_id_new, message_id, "full")
-        else:
-            new_keyboard = await create_dynamic_keyboard(None, message_id, "full")
-        
+        from app.utils.message_utils import send_joke_message
+
         # Вместо редактирования старого сообщения, отправляем новое
         await send_joke_message(callback.message, joke_text, users_jokes_id_new)
         
-        # Удаляем кнопки навигации у старого сообщения (оставляем только кнопки реакции)
-        if users_jokes_id is not None:
-            # Создаем клавиатуру только с кнопками реакции
-            reaction_only_keyboard = await create_dynamic_keyboard(users_jokes_id, message_id, "reaction_only")
-            
-            # Проверяем, изменилась ли клавиатура
-            current_keyboard = callback.message.reply_markup
-            if current_keyboard is None or str(current_keyboard) != str(reaction_only_keyboard):
-                try:
-                    await callback.bot.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=reaction_only_keyboard
-                    )
-                    logger.info(f"Successfully updated keyboard for message {message_id} to reaction_only")
-                except Exception as e:
-                    logger.warning(f"Failed to update keyboard for message {message_id}: {e}")
-            else:
-                logger.info(f"Keyboard for message {message_id} already has reaction_only state, skipping update")
-        else:
-            # Если нет users_jokes_id, удаляем всю клавиатуру
-            current_keyboard = callback.message.reply_markup
-            if current_keyboard is not None:
-                try:
-                    await callback.bot.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=None
-                    )
-                    logger.info(f"Successfully removed keyboard for message {message_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove keyboard for message {message_id}: {e}")
-            else:
-                logger.info(f"Message {message_id} already has no keyboard, skipping update")
-        
+
         await callback.answer()
         
     except Exception as e:
