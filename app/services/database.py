@@ -17,7 +17,7 @@ Base = declarative_base()
 # Create async engine for PostgreSQL
 engine = create_async_engine(
     config.DATABASE_URL,
-    echo=True
+    echo=False
 )
 
 # Create session factory
@@ -79,14 +79,14 @@ async def init_db():
     try:
         # Проверяем флаг RECREATE_DB_SCHEMA в конфигурации
         if str(config.RECREATE_DB_SCHEMA).lower() == 'true':
-            logger.info("RECREATE_DB_SCHEMA = True, начинаем инициализацию базы данных")
+            logger.info("Инициализация базы данных (RECREATE_DB_SCHEMA = True)")
             
             # Get init directory path
             init_path = Path(__file__).parent.parent.parent / 'database' / 'init'
             
             # Execute initialization scripts in order
             for script_file in sorted(init_path.glob('*.sql')):
-                logger.info(f"Executing initialization script: {script_file.name}")
+                logger.debug(f"Executing initialization script: {script_file.name}")
                 with open(script_file, 'r', encoding='utf-8') as f:
                     script = f.read()
                 
@@ -98,9 +98,9 @@ async def init_db():
                     if not query.strip():  # Skip empty queries
                         continue
                     try:
-                        logger.info(f"Executing query {i+1} from {script_file.name}: {query[:100]}...")
+                        logger.debug(f"Executing query {i+1} from {script_file.name}: {query[:100]}...")
                         await DBService.execute(query)
-                        logger.info(f"Successfully executed query {i+1} from {script_file.name}")
+                        logger.debug(f"Successfully executed query {i+1} from {script_file.name}")
                     except Exception as e:
                         logger.error(f"Error executing query {i+1} from {script_file.name}: {str(e)}")
                         logger.error(f"Problematic query: {query}")
@@ -109,9 +109,9 @@ async def init_db():
                         # Continue with next query even if one fails
                         continue
             
-            logger.info("Database initialization completed")
+            logger.info("Инициализация базы данных завершена")
         else:
-            logger.info("RECREATE_DB_SCHEMA = False, пропускаем инициализацию базы данных")
+            logger.debug("RECREATE_DB_SCHEMA = False, пропускаем инициализацию базы данных")
             
         return True  # Return True to indicate success
     except Exception as e:
@@ -218,36 +218,35 @@ class DBService:
         select_query = "SELECT id FROM topics WHERE topic = :topic"
         try:
             if session is not None:
-                try:
-                    result = await session.execute(text(query), {"topic": topic})
-                    row = result.mappings().first()
-                    if row and "id" in row:
-                        logger.info(f"Created topic with ID: {row['id']}")
-                        return int(row["id"])
-                except Exception as e:
-                    # Если тема уже есть (unique violation), ищем её id
-                    logger.info(f"Exception on create_topic: {e}, trying to fetch existing topic id")
-                    result = await session.execute(text(select_query), {"topic": topic})
-                    row = result.mappings().first()
-                    if row and "id" in row:
-                        return int(row["id"])
-                    raise
+                # Сначала пробуем найти существующий топик
+                result = await session.execute(text(select_query), {"topic": topic})
+                row = result.mappings().first()
+                if row and "id" in row:
+                    logger.debug(f"Topic already exists with ID: {row['id']}")
+                    return int(row["id"])
+                # Если не найден — создаём новый
+                result = await session.execute(text(query), {"topic": topic})
+                row = result.mappings().first()
+                if row and "id" in row:
+                    logger.debug(f"Created topic with ID: {row['id']}")
+                    return int(row["id"])
+                raise ValueError("Failed to create or find topic - no ID returned")
             else:
                 # Старый режим — отдельная сессия
                 async with engine.begin() as conn:
-                    try:
-                        result = await conn.execute(text(query), {"topic": topic})
-                        row = result.mappings().first()
-                        if row and "id" in row:
-                            logger.info(f"Created topic with ID: {row['id']}")
-                            return int(row["id"])
-                    except Exception as e:
-                        logger.info(f"Exception on create_topic: {e}, trying to fetch existing topic id")
-                        result = await conn.execute(text(select_query), {"topic": topic})
-                        row = result.mappings().first()
-                        if row and "id" in row:
-                            return int(row["id"])
-                        raise
+                    # Сначала пробуем найти существующий топик
+                    result = await conn.execute(text(select_query), {"topic": topic})
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        logger.debug(f"Topic already exists with ID: {row['id']}")
+                        return int(row["id"])
+                    # Если не найден — создаём новый
+                    result = await conn.execute(text(query), {"topic": topic})
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        logger.debug(f"Created topic with ID: {row['id']}")
+                        return int(row["id"])
+                    raise ValueError("Failed to create or find topic - no ID returned")
         except Exception as e:
             logger.error(f"Error creating topic: {str(e)}")
             raise
@@ -263,8 +262,8 @@ class DBService:
                 result = await session.execute(text(query), {"topic_id": topic_id, "joke": text_joke})
                 row = result.mappings().first()
                 if row and "id" in row:
-                    logger.info(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
-                    return int(row["id"])
+                    logger.debug(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
+                    return int(row["id"]) 
                 else:
                     raise ValueError("Failed to create joke - no ID returned")
             else:
@@ -272,8 +271,8 @@ class DBService:
                     result = await conn.execute(text(query), {"topic_id": topic_id, "joke": text_joke})
                     row = result.mappings().first()
                     if row and "id" in row:
-                        logger.info(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
-                        return int(row["id"])
+                        logger.debug(f"Created joke with ID: {row['id']} for topic_id: {topic_id}")
+                        return int(row["id"]) 
                     else:
                         raise ValueError("Failed to create joke - no ID returned")
         except Exception as e:
@@ -336,44 +335,99 @@ class DBService:
             raise
     
     @staticmethod
-    async def record_user_joke_interaction(user_id: int, joke_id: int, reaction: str = "skip"):
+    async def record_user_joke_interaction(user_id: int, joke_id: int, reaction: str = "skip") -> int:
         """
-        Записывает взаимодействие пользователя с анекдотом.
+        Записывает взаимодействие пользователя с анекдотом и возвращает users_jokes.id.
         """
         try:
-            # Проверяем, есть ли уже запись
+            # Сразу пытаемся получить существующую запись и её id
             check_query = """
-                SELECT 1 FROM users_jokes WHERE user_id = :user_id AND joke_id = :joke_id
+                SELECT id FROM users_jokes WHERE user_id = :user_id AND joke_id = :joke_id
             """
             existing = await DBService.fetch_one(check_query, {
                 "user_id": user_id,
                 "joke_id": joke_id
             })
-            if existing:
-                # Обновляем существующую запись
+            if existing and "id" in existing:
+                # Обновляем существующую запись и возвращаем её id
                 update_query = """
                     UPDATE users_jokes SET reaction = :reaction, created_at = NOW()
-                    WHERE user_id = :user_id AND joke_id = :joke_id
+                    WHERE id = :id
                 """
                 await DBService.execute(update_query, {
-                    "user_id": user_id,
-                    "joke_id": joke_id,
+                    "id": existing["id"],
                     "reaction": reaction
                 })
-                logger.info(f"Updated user {user_id} reaction to joke {joke_id}: {reaction}")
+                logger.debug(f"Updated user {user_id} reaction to joke {joke_id}: {reaction}")
+                return int(existing["id"]) 
             else:
-                # Создаем новую запись
+                # Создаем новую запись и сразу возвращаем её id
                 insert_query = """
                     INSERT INTO users_jokes (user_id, joke_id, reaction)
                     VALUES (:user_id, :joke_id, :reaction)
+                    RETURNING id
                 """
-                await DBService.execute(insert_query, {
-                    "user_id": user_id,
-                    "joke_id": joke_id,
-                    "reaction": reaction
-                })
-                logger.info(f"Recorded user {user_id} reaction to joke {joke_id}: {reaction}")
+                async with engine.begin() as conn:
+                    result = await conn.execute(text(insert_query), {
+                        "user_id": user_id,
+                        "joke_id": joke_id,
+                        "reaction": reaction
+                    })
+                    row = result.mappings().first()
+                    if row and "id" in row:
+                        logger.debug(f"Recorded user {user_id} reaction to joke {joke_id}: {reaction} with id {row['id']}")
+                        return int(row["id"]) 
+                    raise ValueError("Failed to insert users_jokes - no ID returned")
         except Exception as e:
             logger.error(f"Error recording user joke interaction: {str(e)}")
+            raise
+
+    @staticmethod
+    async def update_users_jokes_reaction_by_id(users_jokes_id: int, reaction: str) -> None:
+        """
+        Обновляет реакцию в таблице users_jokes по её первичному ключу.
+        """
+        query = """
+            UPDATE users_jokes 
+            SET reaction = :reaction 
+            WHERE id = :users_jokes_id
+        """
+        await DBService.execute(query, {"reaction": reaction, "users_jokes_id": users_jokes_id})
+
+    @staticmethod
+    async def get_joke_text_by_users_jokes_id(users_jokes_id: int, user_id: int) -> str | None:
+        """
+        Возвращает текст анекдота по users_jokes.id и user_id. Возвращает None, если не найдено.
+        """
+        query = """
+            SELECT j.joke
+            FROM users_jokes uj
+            JOIN jokes j ON j.id = uj.joke_id 
+            JOIN topics t ON t.id = j.topic_id 
+            WHERE uj.id = :users_jokes_id AND uj.user_id = :user_id
+        """
+        row = await DBService.fetch_one(query, {"users_jokes_id": users_jokes_id, "user_id": user_id})
+        return row["joke"] if row and "joke" in row else None
+    
+    @staticmethod
+    async def get_jokes_and_reactions_by_topic_id(topic_id: int) -> list:
+        """
+        Возвращает все анекдоты по теме и количество like/dislike для каждого.
+        [{"id": ..., "joke": ..., "likes": ..., "dislikes": ...}, ...]
+        """
+        try:
+            query = """
+                SELECT j.id, j.joke,
+                    COALESCE(SUM(CASE WHEN uj.reaction = 'like' THEN 1 ELSE 0 END), 0) as likes,
+                    COALESCE(SUM(CASE WHEN uj.reaction = 'dislike' THEN 1 ELSE 0 END), 0) as dislikes
+                FROM jokes j
+                LEFT JOIN users_jokes uj ON uj.joke_id = j.id
+                WHERE j.topic_id = :topic_id
+                GROUP BY j.id, j.joke
+                ORDER BY j.id
+            """
+            return await DBService.fetch_data(query, {"topic_id": topic_id})
+        except Exception as e:
+            logger.error(f"Error getting jokes and reactions by topic ID: {str(e)}")
             raise
     

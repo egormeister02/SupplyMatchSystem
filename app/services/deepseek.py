@@ -7,8 +7,9 @@ import asyncio
 import httpx
 
 from app.config import config
-from app.services.database import DBService
+from app.services.database import DBService, get_db_session
 from sqlalchemy import text
+from app.utils.queue_worker import add_topic_to_queue
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class DeepSeekService:
             loop.create_task(self.initialize_jokes_on_startup())
         except RuntimeError:
             # Комментарии и логи — только на английском, независимо от языка файла!
-            logger.warning("Event loop is not running; initial jokes generation will need manual trigger")
+            logger.debug("Event loop is not running; initial jokes generation will need manual trigger")
 
     @classmethod
     def get_instance(
@@ -117,51 +118,36 @@ class DeepSeekService:
     @staticmethod
     def _parse_jokes_json(raw_json: str) -> List[Dict[str, str]]:
         """Parses JSON string to list of jokes with required keys: topic, text."""
-        print(f"DEBUG: Parsing JSON string of length {len(raw_json)}")
-        
         # Clean the response - remove leading/trailing whitespace
         cleaned = raw_json.strip()
         
-        print(f"DEBUG: Cleaned JSON: {repr(cleaned[:100])}...")
-        
         try:
             data = json.loads(cleaned)
-            print(f"DEBUG: Successfully parsed JSON")
         except json.JSONDecodeError as e:
-            print(f"DEBUG: Failed to parse JSON: {e}")
             raise ValueError(f"Invalid JSON format: {e}")
-        
-        print(f"DEBUG: Parsed data type: {type(data)}")
-        print(f"DEBUG: Parsed data: {repr(data)[:200]}...")
         
         if isinstance(data, dict) and "jokes" in data and isinstance(data["jokes"], list):
             items = data["jokes"]
-            print(f"DEBUG: Found 'jokes' key with {len(items)} items")
         elif isinstance(data, list):
             items = data
-            print(f"DEBUG: Data is a list with {len(items)} items")
         else:
-            print(f"DEBUG: Invalid format - data is {type(data)}")
             raise ValueError("Invalid jokes JSON format")
         
         jokes: List[Dict[str, str]] = []
-        for i, item in enumerate(items):
+        for item in items:
             if not isinstance(item, dict):
-                print(f"DEBUG: Item {i} is not a dict: {type(item)}")
                 continue
             topic = str(item.get("topic", "")).strip()
             joke_text = str(item.get("text", "")).strip()
-            print(f"DEBUG: Item {i}: topic='{topic}', text='{joke_text[:50]}...'")
             if topic and joke_text:
                 jokes.append({"topic": topic, "text": joke_text})
         
-        print(f"DEBUG: Successfully parsed {len(jokes)} jokes")
         if len(jokes) == 0:
             raise ValueError("No valid jokes parsed from JSON")
         return jokes
 
     async def initialize_jokes_on_startup(self) -> Tuple[int, int]:
-        logger.info("[DeepSeek] Called initialize_jokes_on_startup")
+        logger.info("[DeepSeek] Initializing starter jokes (one-time)")
         if self._initial_jokes_generated:
             return (-1, 0)
 
@@ -195,13 +181,6 @@ class DeepSeekService:
         )
         content = data["choices"][0]["message"]["content"]
         
-        # Debug: print the raw response from DeepSeek
-        print(f"DEBUG: Raw response from DeepSeek:")
-        print(f"DEBUG: {repr(content)}")
-        print(f"DEBUG: Content length: {len(content)}")
-        print(f"DEBUG: First 200 chars: {content[:200]}")
-        print(f"DEBUG: Last 200 chars: {content[-200:]}")
-        
         # 2. Затем используем универсальную функцию retry для парсинга
         jokes = await self.parse_with_retry(
             content=content,
@@ -209,29 +188,26 @@ class DeepSeekService:
         )
 
         # Persist to DB: create jokes with topics directly
-        print(f"DEBUG: Starting database operations...")
-        print(f"DEBUG: Creating jokes with topics...")
-        from app.services.database import get_db_session
         topic_ids = {}
         inserted_count = 0
         async with get_db_session() as session:
             for joke in jokes:
                 topic = joke["topic"].strip()
                 joke_text = joke["text"].strip()
+                
                 if not topic or not joke_text:
                     continue
                 if topic not in topic_ids:
                     try:
+                        await add_topic_to_queue(topic)
                         topic_id = await DBService.create_topic(topic, session=session)
-                    except Exception as e:
-                        print(f"DEBUG: Exception on create_topic: {e}, trying to fetch existing topic id")
+                    except Exception:
                         query = "SELECT id FROM topics WHERE topic = :topic"
                         result = await session.execute(text(query), {"topic": topic})
                         row = result.mappings().first()
                         if row and "id" in row:
                             topic_id = int(row["id"])
                         else:
-                            print(f"DEBUG: Failed to get topic_id for topic: {topic}")
                             continue
                     topic_ids[topic] = topic_id
                 else:
@@ -239,11 +215,9 @@ class DeepSeekService:
                 try:
                     await DBService.create_joke(topic_id, joke_text, session=session)
                     inserted_count += 1
-                except Exception as e:
-                    print(f"DEBUG: Failed to insert joke for topic_id={topic_id}: {e}")
+                except Exception:
                     continue
             await session.commit()
-        print(f"DEBUG: Created {inserted_count} jokes")
         
         if inserted_count > 0:
             self._initial_jokes_generated = True
@@ -275,12 +249,13 @@ class DeepSeekService:
         Принимает готовый контент от DeepSeek и функцию парсинга.
         При ошибке парсинга отправляет повторный запрос с просьбой исправить формат.
         """
-        logger.info(f"[DeepSeek] parse_with_retry called with content length: {len(content)}")
+        logger.debug(f"[DeepSeek] parse_with_retry called with content length: {len(content)}")
         
         try:
             return parse_func(content, *args, **kwargs)
         except Exception as e:
             logger.warning(f"Parse error: {e}. Sending correction request to DeepSeek.")
+            logger.error(f"[DeepSeek] PARSE FAIL: type={type(content)}, repr={repr(content)}, error={e}")
             fix_prompt = (
                 "Исправь формат ответа и верни ТОЛЬКО валидный JSON без каких-либо комментариев, пояснений, преамбулы, "
                 "без markdown-кодблоков (никаких ``` или ```json), без завершающего текста. Должен быть только JSON.\n"
@@ -298,56 +273,63 @@ class DeepSeekService:
             fix_content = fix_data["choices"][0]["message"]["content"]
             return parse_func(fix_content, *args, **kwargs)
 
-    async def request_joke(self, topic: str) -> str:
-        """Запрашивает анекдот на заданную тему у DeepSeek"""
-        system_req = (
-            "Ты - мастер анекдотов. Создай один смешной анекдот на заданную тему. "
-            "Анекдот должен быть коротким, понятным и действительно смешным. "
-            "Отвечай ТОЛЬКО текстом анекдота, без дополнительных комментариев."
-        )
-        
-        user_req = f"Создай смешной анекдот на тему: {topic}"
-        
-        messages = self.build_messages([
-            {"role": "system", "content": system_req},
-            {"role": "user", "content": user_req},
-        ])
-        
-        try:
-            data = await self._chat_completion(
-                messages,
-                model="deepseek-chat",
-                temperature=0.8,
-                max_tokens=500,
-            )
-            
-            return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"Error requesting joke from DeepSeek: {str(e)}")
-            raise
-
     async def request_jokes(self, topic: str, n: int = 5) -> str:
         """
-        Запрашивает n анекдотов на заданную тему у DeepSeek
+        Запрашивает n анекдотов на заданную тему у DeepSeek, с учётом уже существующих анекдотов и реакций пользователей.
         """
+        # Получаем topic_id
+        jokes_context = ""
+        topic_id = None
+        # Получить topic_id
+        from sqlalchemy import text
+        async with get_db_session() as session:
+            res = await session.execute(text("SELECT id FROM topics WHERE topic = :topic"), {"topic": topic})
+            row = res.first()
+            if row:
+                topic_id = row.id
+        if topic_id:
+            jokes = await DBService.get_jokes_and_reactions_by_topic_id(topic_id)
+            if jokes:
+                jokes_context = "\n".join([
+                    f"Анекдот: {j['joke']} | Лайков: {j['likes']} | Дизлайков: {j['dislikes']}"
+                    for j in jokes
+                ])
+        # Формируем промт
         system_req = (
-            "Ты - мастер анекдотов. Создай несколько смешных анекдотов на заданную тему. "
-            f"Верни ТОЛЬКО JSON-массив из {n} объектов, каждый с полями 'text'. Никаких других полей, комментариев или пояснений. "
+            "Ты — мастер анекдотов. Твоя задача — создать несколько новых, действительно смешных анекдотов на заданную тему. "
+            "Перед тобой список уже существующих анекдотов по этой теме и реакции пользователей на них. "
+            "Не повторяй эти анекдоты, не перефразируй их, не используй их сюжет. "
+            "Учитывай, что анекдоты с большим количеством лайков — смешные, а с дизлайками — неудачные, избегай их стиля. "
+            f"Создай {n} новых анекдотов, которых нет в списке ниже.\n"
+            "\n"
+            "ОТВЕТ ДОЛЖЕН БЫТЬ ТОЛЬКО В ВИДЕ ВАЛИДНОГО JSON-МАССИВА!\n"
+            "- Не используй markdown-кодблоки, не добавляй никаких пояснений, комментариев, текста до или после массива.\n"
+            "- Каждый элемент массива — объект с полем 'text'.\n"
+            "- Пример правильного ответа: [{\"text\": \"Анекдот 1\"}, {\"text\": \"Анекдот 2\"}]\n"
+            f"- Если не можешь придумать {n} анекдотов, верни столько, сколько получилось, но обязательно в виде массива.\n"
+            "- Не добавляй никаких других полей, кроме 'text'.\n"
             "Ответ должен начинаться с '[' и заканчиваться ']'."
         )
-        user_req = f"Создай {n} смешных анекдотов на тему: {topic}"
+        user_req = f"Тема: {topic}\n\nСписок существующих анекдотов и реакций:\n{jokes_context if jokes_context else 'Нет.'}\n\nСоздай {n} новых анекдотов."
         messages = self.build_messages([
             {"role": "system", "content": system_req},
             {"role": "user", "content": user_req},
         ])
         try:
-            data = await self._chat_completion(
+            raw_response = await self._chat_completion(
                 messages,
                 model="deepseek-chat",
                 temperature=0.8,
                 max_tokens=1500,
             )
-            return data["choices"][0]["message"]["content"]
+            content = raw_response["choices"][0]["message"]["content"]
+            data = await self.parse_with_retry(
+                content,
+                self._parse_jokes_list
+            )
+            # Возвращаем обратно JSON-строку, чтобы не ломать интерфейс
+            import json
+            return json.dumps(data, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error requesting jokes from DeepSeek: {str(e)}")
             raise

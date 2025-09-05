@@ -15,6 +15,7 @@ from app.handlers import register_all_handlers
 from app.config.logging import app_logger
 from app.services.database import init_db
 from app.services.deepseek import DeepSeekService
+from app.utils.queue_worker import start_topic_queue_workers
 
 # Логгер для main.py, используем существующую конфигурацию из app.config.logging
 logger = logging.getLogger(__name__)
@@ -73,6 +74,9 @@ async def startup():
     await bot.set_my_commands([
         types.BotCommand(command="/start", description="Главное меню")
     ])
+
+    # Запуск фоновых воркеров очереди тем
+    asyncio.create_task(start_topic_queue_workers())
 
     logger.info("Application started successfully")
 
