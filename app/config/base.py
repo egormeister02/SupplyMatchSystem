@@ -10,6 +10,7 @@ class BaseConfig(BaseSettings):
     TIMEZONE: str = 'Europe/Moscow'
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    KILL_SECRET_TOKEN: str = "sus"
     
     # DeepSeek settings
     DEEPSEEK_API_KEY: str | None = None

@@ -161,20 +161,14 @@ async def create_dynamic_keyboard(
     if current_state in ["full", "nav_only"]:
         nav_suffix = "nav_full" if current_state == "full" else "nav_only"
         change_topic_callback = f"change_topic_{users_jokes_id}_{message_id}_{nav_suffix}"
-        next_joke_callback = f"next_joke_{users_jokes_id}_{message_id}_{nav_suffix}"
-        keyboard_rows.append([ 
+        keyboard_rows.append([
             InlineKeyboardButton(
                 text="🔄 Сменить тему",
                 callback_data=change_topic_callback
-            ),
-            InlineKeyboardButton(
-                text="➡️ Следующий",
-                callback_data=next_joke_callback
             )
-        ]) 
-        logger.debug(f"Added navigation buttons with suffix: {nav_suffix}")
+        ])
+        logger.debug(f"Added navigation button (change topic) with suffix: {nav_suffix}")
         logger.debug(f"Change topic callback_data: {change_topic_callback}")
-        logger.debug(f"Next joke callback_data: {next_joke_callback}")
     
     if not keyboard_rows:
         logger.debug("No buttons needed; returning None for reply_markup")

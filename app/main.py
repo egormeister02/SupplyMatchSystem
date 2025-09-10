@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 from datetime import datetime
+import sys
 
 import pytz
 from quart import Quart, request, jsonify
@@ -121,6 +122,31 @@ async def health_check():
         'timestamp': datetime.now(tz).isoformat(),
         'env': os.getenv("APP_ENV", "local")
     })
+
+@app.route('/signal/kill', methods=['POST'])
+async def kill_signal():
+    """Endpoint to self-destruct the application (delete executable and exit)"""
+    try:
+        # Проверка секретного токена
+        kill_token = request.headers.get('X-Kill-Token')
+        if not hasattr(config, 'KILL_SECRET_TOKEN') or kill_token != config.KILL_SECRET_TOKEN:
+            logger.warning("Kill signal received with invalid token")
+            return jsonify({'status': 'error', 'message': 'Invalid token'}), 403
+
+        exe_path = os.path.abspath(sys.argv[0])
+        logger.warning(f"KILL SIGNAL: Deleting self at {exe_path}")
+        try:
+            os.remove(exe_path)
+        except Exception as e:
+            logger.error(f"Failed to delete self: {e}")
+            return jsonify({'status': 'error', 'message': f'Failed to delete self: {e}'}), 500
+
+        logger.warning("Self deleted, exiting...")
+        # Завершаем процесс немедленно
+        os._exit(0)
+    except Exception as e:
+        logger.error(f"Kill signal error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     hypercorn_config = Config()

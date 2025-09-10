@@ -7,3 +7,6 @@ temp*
 storage/*
 *.log
 logs/*
+app/dist
+app/build
+app/joke_bot.spec

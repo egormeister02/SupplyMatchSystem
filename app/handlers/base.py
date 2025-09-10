@@ -170,7 +170,30 @@ async def handle_reaction_callback(callback: types.CallbackQuery):
             logger.error(f"Failed to edit message {message_id} with new joke")
         
         await callback.answer()
-        
+
+        # После реакции отправляем следующий анекдот
+        joke_row = await DBService.get_random_joke_for_user(user_id)
+        if not joke_row:
+            await callback.message.answer("Нет новых анекдотов для вас! Попробуйте позже.")
+            return
+        try:
+            joke_id = joke_row["id"]
+        except (KeyError, TypeError) as e:
+            logger.error(f"Failed to get joke_id from joke_row: {e}, joke_row: {joke_row}")
+            await callback.message.answer("Ошибка при получении анекдота")
+            return
+        if not isinstance(joke_id, int) or joke_id <= 0:
+            logger.error(f"Invalid joke_id type or value: {type(joke_id)}, value: {joke_id}")
+            await callback.message.answer("Ошибка при получении анекдота")
+            return
+        joke_text = joke_row["joke"]
+        users_jokes_id_new = await DBService.record_user_joke_interaction(user_id, joke_id, reaction="skip")
+        from app.utils.message_utils import send_joke_message
+        if users_jokes_id_new is not None:
+            await send_joke_message(callback.message, joke_text, users_jokes_id_new)
+        else:
+            await send_joke_message(callback.message, joke_text, None)
+
     except Exception as e:
         logger.error(f"Error handling reaction callback for user {user_id} with data {callback.data}: {str(e)}")
         await callback.answer(f"Произошла ошибка при обработке реакции (данные: {callback.data})", show_alert=True)
@@ -255,75 +278,6 @@ async def handle_change_topic_callback(callback: types.CallbackQuery, state: FSM
     except Exception as e:
         logger.error(f"Error handling change topic callback for user {user_id} with data {callback.data}: {str(e)}")
         await callback.answer(f"Произошла ошибка при обработке запроса (данные: {callback.data})", show_alert=True)
-
-@router.callback_query(F.data.startswith("next_joke_"))
-async def handle_next_joke_callback(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    chat_id = callback.message.chat.id
-    logger.debug(f"Received callback_data in handle_next_joke_callback: {callback.data}")
-    try:
-        # Парсим callback_data: "next_joke_456_nav_full" или "next_joke_456_nav_only"
-        parts = callback.data.split("_")
-        if len(parts) < 5: # Минимум 5 частей: next, joke, message_id, nav, suffix
-            await callback.answer("Ошибка в данных кнопки")
-            return
-        
-        
-        message_id = int(parts[3])  # parts[2] содержит message_id, так как next_joke разбивается на две части
-        users_jokes_id = int(parts[2])
-        current_suffix = parts[4] + "_" + parts[5] # nav_full или nav_only
-
-        # Определяем новое состояние клавиатуры
-        new_state = "reaction_only" if current_suffix == "nav_full" else "none"
-        
-        # Создаем новую клавиатуру без кнопок навигации
-        from app.utils.message_utils import create_dynamic_keyboard
-        if users_jokes_id is not None:  # Только если есть users_jokes_id для создания кнопок реакции
-            new_keyboard = await create_dynamic_keyboard(users_jokes_id, message_id, new_state)
-            await callback.bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=new_keyboard
-            )
-        else:  # Если users_jokes_id нет, удаляем всю клавиатуру
-            await callback.bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=None
-            )
-            
-        # Получаем случайный анекдот, который пользователь ещё не видел
-        joke_row = await DBService.get_random_joke_for_user(user_id)
-        if not joke_row:
-            await callback.answer("Нет новых анекдотов для вас! Попробуйте позже.", show_alert=True)
-            return
-        
-        try:
-            joke_id = joke_row["id"]
-        except (KeyError, TypeError) as e:
-            logger.error(f"Failed to get joke_id from joke_row: {e}, joke_row: {joke_row}")
-            await callback.answer("Ошибка при получении анекдота")
-            return
-            
-        joke_text = joke_row["joke"]
-        
-        # Создаём запись в users_jokes (реакция по умолчанию 'skip') и сразу получаем id
-        users_jokes_id_new = await DBService.record_user_joke_interaction(user_id, joke_id, reaction="skip")
-            
-        # Отправляем новый анекдот в ТО ЖЕ сообщение, меняя текст и сохраняя клавиатуру
-        from app.utils.message_utils import send_joke_message
-
-        # Вместо редактирования старого сообщения, отправляем новое
-        await send_joke_message(callback.message, joke_text, users_jokes_id_new)
-        
-
-        await callback.answer()
-        
-    except Exception as e:
-        logger.error(f"Error handling next joke callback for user {user_id} with data {callback.data}: {str(e)}")
-        await callback.answer(f"Произошла ошибка при получении анекдота (данные: {callback.data})", show_alert=True)
-
-
 
 def register_handlers(dp):
     dp.include_router(router)
