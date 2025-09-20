@@ -62,13 +62,46 @@ if [ -f "/etc/nginx/sites-enabled/$DOMAIN" ]; then
     sudo rm -f "/etc/nginx/sites-enabled/$DOMAIN"
 fi
 
-# 6. Create nginx config for the domain
+# 6. Create nginx config for the domain (HTTP only, for certbot)
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 NGINX_LINK="/etc/nginx/sites-enabled/$DOMAIN"
 
-echo "Creating nginx configuration for $DOMAIN..."
+echo "Creating nginx HTTP configuration for $DOMAIN (for certbot)..."
+sudo tee "$NGINX_CONF" > /dev/null <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF
 
-# Create nginx config with proper escaping for nginx variables
+# 7. Enable config
+echo "Enabling nginx configuration..."
+sudo mkdir -p /etc/nginx/sites-enabled
+sudo ln -sf "$NGINX_CONF" "$NGINX_LINK"
+
+# 8. Include sites-enabled in nginx.conf if not already
+if ! grep -q 'sites-enabled' /etc/nginx/nginx.conf; then
+    echo "Adding sites-enabled include to nginx.conf..."
+    sudo sed -i '/http {/a     include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
+fi
+
+# 9. Test and reload nginx
+echo "Testing nginx configuration (HTTP only)..."
+sudo nginx -t || { echo "nginx config test failed!"; exit 1; }
+sudo systemctl reload nginx
+
+# 10. Obtain Let's Encrypt certificate
+echo "Obtaining Let's Encrypt certificate for $DOMAIN..."
+sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m joke_bot@egormeister.ru --redirect
+
+# 11. Add HTTPS server block to nginx config
+echo "Adding HTTPS server block to nginx config..."
 sudo tee "$NGINX_CONF" > /dev/null <<EOF
 server {
     listen 80;
@@ -100,28 +133,12 @@ server {
 }
 EOF
 
-# 7. Enable config
-echo "Enabling nginx configuration..."
-sudo mkdir -p /etc/nginx/sites-enabled
-sudo ln -sf "$NGINX_CONF" "$NGINX_LINK"
-
-# 8. Include sites-enabled in nginx.conf if not already
-if ! grep -q 'sites-enabled' /etc/nginx/nginx.conf; then
-    echo "Adding sites-enabled include to nginx.conf..."
-    sudo sed -i '/http {/a     include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
-fi
-
-# 9. Test and reload nginx
-echo "Testing nginx configuration..."
-sudo nginx -t || { echo "nginx config test failed!"; exit 1; }
+# 12. Test and reload nginx with HTTPS
+echo "Testing nginx configuration (with HTTPS)..."
+sudo nginx -t || { echo "nginx config test failed after adding HTTPS!"; exit 1; }
 sudo systemctl reload nginx
 
-# 10. Obtain Let's Encrypt certificate
-echo "Obtaining Let's Encrypt certificate for $DOMAIN..."
-echo "IMPORTANT: Replace 'your@email.com' with your actual email address!"
-sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m joke_bot@egormeister.ru --redirect
-
-# 11. Test renewal (autorenewal is set up by certbot.timer)
+# 13. Test renewal (autorenewal is set up by certbot.timer)
 echo "Testing certificate renewal..."
 sudo certbot renew --dry-run
 
@@ -129,7 +146,5 @@ echo ""
 echo "Setup complete! Your app is available at: https://$DOMAIN (proxy to localhost:8000)"
 echo "SSL certificate will auto-renew via certbot.timer (systemd)."
 echo ""
-echo "IMPORTANT: Make sure to:"
-echo "1. Replace 'your@email.com' with your actual email in the certbot command above"
-echo "2. Ensure ports 80 and 443 are open in your firewall/cloud provider"
-echo "3. Your server must be accessible from the internet for Let's Encrypt validation"
+echo "IMPORTANT: Ensure ports 80 and 443 are open in your firewall/cloud provider."
+echo "Your server must be accessible from the internet for Let's Encrypt validation."
