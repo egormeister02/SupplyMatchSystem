@@ -12,3 +12,4 @@ class ProductionConfig(BaseConfig):
     
     # Другие специфичные для продакшена настройки
     DEBUG: bool = False
+    RECREATE_DB_SCHEMA: bool = False

@@ -39,8 +39,10 @@ class DeepSeekService:
         self._initial_jokes_generated: bool = False
         # Автозапуск генерации стартовых анекдотов
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.initialize_jokes_on_startup())
+            from app.config import config
+            if getattr(config, 'RECREATE_DB_SCHEMA', False):
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.initialize_jokes_on_startup())
         except RuntimeError:
             # Комментарии и логи — только на английском, независимо от языка файла!
             logger.debug("Event loop is not running; initial jokes generation will need manual trigger")
