@@ -69,7 +69,7 @@ NGINX_LINK="/etc/nginx/sites-enabled/$DOMAIN"
 echo "Creating nginx configuration for $DOMAIN..."
 
 # Create nginx config with proper escaping for nginx variables
-sudo tee "$NGINX_CONF" > /dev/null << 'EOF'
+sudo tee "$NGINX_CONF" > /dev/null <<EOF
 server {
     listen 80;
     server_name $DOMAIN;
@@ -77,7 +77,7 @@ server {
         root /var/www/html;
     }
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://\$host\$request_uri;
     }
 }
 
@@ -92,10 +92,10 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
@@ -119,7 +119,7 @@ sudo systemctl reload nginx
 # 10. Obtain Let's Encrypt certificate
 echo "Obtaining Let's Encrypt certificate for $DOMAIN..."
 echo "IMPORTANT: Replace 'your@email.com' with your actual email address!"
-sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m your@email.com --redirect
+sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m joke_bot@egormeister.ru --redirect
 
 # 11. Test renewal (autorenewal is set up by certbot.timer)
 echo "Testing certificate renewal..."
